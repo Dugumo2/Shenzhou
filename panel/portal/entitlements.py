@@ -34,30 +34,11 @@ def next_reset(value, reset_day, reset_hour=0, reset_minute=0):
 
 
 def current_cycle(entitlement, at=None):
-    """调用者持有权益行锁；没有真实开通时间就不虚构账期。"""
-    at = at or timezone.now()
-    if not entitlement.activated_at or at < entitlement.activated_at:
-        return None
-    cycle = entitlement.cycles.filter(starts_at__lte=at, ends_at__gt=at).first()
-    if cycle:
-        return cycle
-    start = entitlement.activated_at
-    last = entitlement.cycles.filter(ends_at__lte=at).order_by('-ends_at').first()
-    if last:
-        start = last.ends_at
-    anchor = entitlement.activated_at.astimezone(SHANGHAI)
-    applied = entitlement.applied_snapshot if entitlement.applied_revision else {}
-    configured_day = applied.get('reset_day', entitlement.reset_day)
-    configured_hour = applied.get('reset_hour', entitlement.reset_hour)
-    configured_minute = applied.get('reset_minute', entitlement.reset_minute)
-    day = configured_day or anchor.day
-    hour = configured_hour if configured_hour is not None else anchor.hour
-    minute = configured_minute if configured_minute is not None else anchor.minute
-    end = next_reset(start, day, hour, minute)
-    while end <= at:
-        start, end = end, next_reset(end, day, hour, minute)
-    return BillingCycle.objects.get_or_create(entitlement=entitlement, starts_at=start,
-                                              defaults={'ends_at': end, 'raw_bytes': 0})[0]
+    """显式时间只查已确定周期；无时间参数才由权威当前时间推进。"""
+    from .billing_schedule import advance_billing_cycles, lookup_cycle
+    if at is not None:
+        return lookup_cycle(entitlement, at)
+    return advance_billing_cycles(entitlement)
 
 
 def _require_admin(actor):
@@ -118,7 +99,9 @@ def assign_entitlement(actor, user, line_ids, quota_bytes, reset_day=None, servi
             raise ValidationError('服务尚未开通，不能续期')
         record = Entitlement(user=user)
     else:
-        # 已开始账期不重算边界，新的锚点在下个账期生效；额度不清零。
+        # 独立计划接管后，旧综合保存不得覆盖重置锚点。
+        if record.billing_revisions.exists():
+            reset_day, reset_hour, reset_minute = record.reset_day, record.reset_hour, record.reset_minute
         record.revision += 1
     if renew:
         if not record.activated_at or not record.expires_at:
@@ -219,9 +202,16 @@ def _record_usage_atomic(identity_id, server_id, epoch, sequence, upload_bytes, 
     if identity.state == 'candidate':
         raise ValidationError('未开通身份不能写入计量')
     record = Entitlement.objects.select_for_update().get(pk=identity.subscription.entitlement_id)
+    # 先按权威现在推进；历史或超前样本只能查询已经确定的边界。
+    current_cycle(record)
     cycle = current_cycle(record, observed_at)
     if cycle is None:
-        raise ValidationError('开通前不能计费')
+        if not record.activated_at or observed_at < record.activated_at:
+            raise ValidationError('开通前不能计费')
+        # 边界检查点可属于已确认的旧期末，不能凭超前样本创建新期。
+        cycle = record.cycles.filter(ends_at=observed_at).order_by('-starts_at').first()
+        if cycle is None:
+            raise MeteringGap('样本不属于已确认账期，请先核验并推进边界')
     stream = UsageStream.objects.filter(identity=identity, epoch=epoch).first()
     if stream and (stream.retired_at or sequence <= stream.sequence):
         return 0

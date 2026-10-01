@@ -184,6 +184,45 @@ class BillingCycle(models.Model):
             models.CheckConstraint(condition=models.Q(ends_at__gt=models.F('starts_at')), name='positive_billing_period')]
 
 
+class BillingPlan(models.Model):
+    """独立账期计划；版本不参与核心配置或身份执行。"""
+    entitlement = models.OneToOneField(Entitlement, on_delete=models.PROTECT, related_name='billing_plan')
+    cycle = models.ForeignKey(BillingCycle, on_delete=models.PROTECT, related_name='active_plans')
+    next_reset_at = models.DateTimeField()
+    anchor_day = models.PositiveSmallIntegerField()
+    hour = models.PositiveSmallIntegerField()
+    minute = models.PositiveSmallIntegerField()
+    revision = models.PositiveIntegerField(default=1)
+    updated_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, on_delete=models.PROTECT)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.CheckConstraint(condition=models.Q(anchor_day__gte=1, anchor_day__lte=31), name='billing_anchor_day'),
+            models.CheckConstraint(condition=models.Q(hour__lte=23, minute__lte=59), name='billing_anchor_time'),
+        ]
+
+
+class BillingPlanRevision(models.Model):
+    """计划修改与安全重放结果；不存预览令牌，不改历史用量。"""
+    entitlement = models.ForeignKey(Entitlement, on_delete=models.PROTECT, related_name='billing_revisions')
+    actor = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
+    revision = models.PositiveIntegerField()
+    expected_revision = models.PositiveIntegerField()
+    idempotency_key = models.CharField(max_length=128)
+    request_digest = models.CharField(max_length=64)
+    before = models.JSONField()
+    after = models.JSONField()
+    result = models.JSONField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=['entitlement', 'revision'], name='unique_billing_plan_revision'),
+            models.UniqueConstraint(fields=['entitlement', 'actor', 'idempotency_key'], name='unique_billing_plan_request'),
+        ]
+
+
 class DeviceSubscription(models.Model):
     CLIENTS = [('windows', 'Windows / v2rayN'), ('v2rayng', 'Android / v2rayNG'), ('android', 'Android / SFA')]
     public_id = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)

@@ -92,7 +92,7 @@ def queue_resumptions(now=None):
     for record in records:
         if record.applied_revision != record.revision:
             continue
-        cycle = current_cycle(record, now)
+        cycle = current_cycle(record)
         if cycle is None or cycle.used_bytes >= record.applied_snapshot.get('quota_bytes', 0):
             continue
         # 加入暂停任务主键，保证同账期多次计量中断恢复仍分别幂等。
@@ -341,7 +341,7 @@ def finish_job(pk, lease_id, plan, receipt):
                 'service_months': record.service_months, 'enabled': record.enabled,
                 'expires_at': record.expires_at.isoformat(), 'evidence_scope': receipt['scope']}
             record.save()
-            current_cycle(record, now)
+            current_cycle(record)
             for sub in record.subscriptions.exclude(state='disabled'):
                 required = expected_identity_pairs(sub)
                 existing = set(sub.identities.filter(generation=sub.generation, revoked_at__isnull=True,

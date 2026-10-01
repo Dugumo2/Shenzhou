@@ -107,7 +107,8 @@ class ServiceCapacityTest(TestCase):
             run_job(job.public_id, IsolatedAdapter())
         record.refresh_from_db()
         self.assertEqual(record.cycles.get().ends_at.astimezone(SHANGHAI), datetime(2027, 2, 28, 14, 37, tzinfo=SHANGHAI))
-        march = current_cycle(record, datetime(2027, 3, 1, tzinfo=SHANGHAI))
+        with patch('django.utils.timezone.now', return_value=datetime(2027, 3, 1, tzinfo=SHANGHAI)):
+            march = current_cycle(record)
         self.assertEqual(march.ends_at.astimezone(SHANGHAI), datetime(2027, 3, 31, 14, 37, tzinfo=SHANGHAI))
 
     def test_edit_does_not_renew_and_explicit_renewal_extends_expiry(self):

@@ -82,9 +82,13 @@ class ServiceAllocationForm(RequestForm):
     operation = forms.ChoiceField(label='本次操作', choices=[('save', '保存设置'), ('renew', '续期')], initial='save')
     revision = forms.IntegerField(widget=forms.HiddenInput, min_value=0, initial=0)
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, billing_managed=False, **kwargs):
         super().__init__(*args, **kwargs)
         self.fields['lines'].queryset = Line.objects.filter(enabled=True).select_related('ingress__server')
+        if billing_managed:
+            for name in ('reset_mode', 'reset_day', 'reset_time'):
+                self.fields[name].disabled = True
+                self.fields[name].help_text = '重置计划已独立管理，请使用服务的重置时间操作。'
 
     def clean(self):
         data = super().clean()

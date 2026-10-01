@@ -351,7 +351,8 @@ def user_detail(request, pk):
             service_months=target.service_months, enabled=target.enabled, expires_at=target.requested_expires_at,
             validity_mode='date' if target.requested_expires_at else 'months',
             reset_mode='custom' if target.reset_day is not None else 'activation', revision=target.revision)
-    form = ServiceAllocationForm(request.POST if request.method == 'POST' else None, initial=initial)
+    form = ServiceAllocationForm(request.POST if request.method == 'POST' else None, initial=initial,
+        billing_managed=bool(target and target.billing_revisions.exists()))
     if request.method == 'POST' and form.is_valid():
         data = form.cleaned_data
         try:
