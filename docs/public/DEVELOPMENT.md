@@ -16,10 +16,10 @@ $env:PANEL_SITE_BRAND = '神舟云'
 $env:PANEL_OPERATOR_ENABLED = '0'
 $env:PANEL_LIVE = '0'
 & panel/.venv/Scripts/python.exe panel/manage.py check
-& panel/.venv/Scripts/python.exe panel/manage.py test tests portal --noinput
+& panel/.venv/Scripts/python.exe scripts/public/test_panel.py
 ```
 
-测试使用隔离数据与假身份。不把测试数据库放进生产，不设置真实订阅路径。部分旧测试依赖历史发布脚本或核心，若失败需单列原因，不能跳过后声称整个产品通过。公开文件检查：`python scripts/public/check_public_tree.py`；它核对Git文件清单、禁入内容和公开文档链接，不代替人工保密审查。
+测试使用隔离数据与假身份。不把测试数据库放进生产，不设置真实订阅路径。公开测试入口明确运行303项独立测试，另有14项 `tests.test_production` 依赖未公开现场脚本，报告为NOT TESTED，绝不计入公开通过数。原工作区全套317项测试已通过；干净恢复目录曾实测该14项缺少源脚本而失败，不能声称全套从仓库可复现。可用原始命令 `panel/manage.py test tests portal --noinput` 复现此限制。公开文件检查：`python scripts/public/check_public_tree.py`；它核对Git文件清单、禁入内容和公开文档链接，不代替人工保密审查。
 
 ## 查看旧候选
 
