@@ -145,10 +145,12 @@ def summary_for(user, actor=None):
     if record is None:
         return None
     now = timezone.now()
-    cycle = record.cycles.filter(starts_at__lte=now, ends_at__gt=now).first()
-    measured = (not record.metering_gap and record.usage_updated_at is not None and
-                now - timedelta(minutes=3) <= record.usage_updated_at <= now + timedelta(seconds=30))
-    used = cycle.used_bytes if cycle and record.usage_updated_at else None
+    rows = list(record.cycles.filter(starts_at__lte=now, ends_at__gt=now)[:2])
+    cycle = rows[0] if len(rows) == 1 else None
+    from .metering_quality import assess_metering
+    metering = assess_metering(record, cycle, now)
+    measured = metering['quality'] == 'fresh'
+    used = cycle.used_bytes if metering['usable'] else None
     applied = dict(record.applied_snapshot)
     effective_quota = applied.get('quota_bytes')
     return {'entitlement': record, 'state': record.state,
@@ -161,10 +163,10 @@ def summary_for(user, actor=None):
                         'service_months': record.service_months,
                         'expires_at': record.requested_expires_at, 'enabled': record.enabled},
             'applied_snapshot': applied,
-            'used_bytes': used, 'raw_bytes': cycle.raw_bytes if cycle and record.usage_updated_at else None,
-            'remaining_bytes': max(0, effective_quota - used) if used is not None and effective_quota is not None else None,
+            'used_bytes': used, 'raw_bytes': cycle.raw_bytes if metering['usable'] else None,
+            'remaining_bytes': max(0, effective_quota - used) if measured and used is not None and effective_quota is not None else None,
             'usage_fresh': measured, 'usage_updated_at': record.usage_updated_at,
-            'metering_gap': record.metering_gap, 'suspension_reason': record.suspension_reason,
+            'metering_gap': metering['quality'] == 'gap', 'suspension_reason': record.suspension_reason,
             'expires_at': record.expires_at, 'resets_at': cycle.ends_at if cycle else None,
             'applied': record.state == 'active' and record.applied_revision == record.revision}
 
@@ -221,8 +223,7 @@ def _record_usage_atomic(identity_id, server_id, epoch, sequence, upload_bytes, 
         previous_epoch_sample = latest
         if latest and observed_at <= latest.observed_at:
             raise ValidationError('拒绝晚到的旧计数代际')
-        if (latest and latest.cycle_id != cycle.pk and latest.observed_at < cycle.starts_at
-                and upload_bytes + download_bytes):
+        if latest and latest.cycle_id != cycle.pk and latest.observed_at < cycle.starts_at:
             # 更换核心计数代际不能代替旧代际的账期末检查点。
             raise MeteringGap('跨账期重启仍需要旧代际边界样本')
         UsageStream.objects.filter(identity=identity, retired_at__isnull=True).update(retired_at=observed_at)
@@ -234,8 +235,14 @@ def _record_usage_atomic(identity_id, server_id, epoch, sequence, upload_bytes, 
         raise ValidationError('累计值回退必须提供新的计数代际')
     up, down = upload_bytes - stream.upload_bytes, download_bytes - stream.download_bytes
     if latest and latest.cycle_id != cycle.pk and observed_at == cycle.starts_at:
-        # 边界瞬间累计值作为上一周期的末样本；下一样本再从此累计值算新周期。
-        cycle = latest.cycle
+        # 只有相邻旧期的明确末边界可以回记旧期。跨过一个或多个未采样
+        # 账期时，不能把累计差分猜回最早旧期；非零差分必须进入缺口。
+        if latest.cycle.ends_at != cycle.starts_at:
+            if up + down:
+                raise MeteringGap('跨多个账期缺少边界样本，不能猜测流量归属')
+        else:
+            # 边界瞬间累计值作为上一周期的末样本；下一样本再从此累计值算新周期。
+            cycle = latest.cycle
     if latest and latest.cycle_id != cycle.pk and latest.observed_at < cycle.starts_at and up + down:
         # 两次采样跨月且没有边界累计值时，不能把上一账期的流量错误扣到新月。
         raise MeteringGap('跨账期需要边界累计样本，不能猜测流量归属')
@@ -268,15 +275,9 @@ def acknowledge_metering_recovery(actor, entitlement_id):
     cycle = current_cycle(record)
     if cycle is None:
         raise ValidationError('尚无开通账期')
-    identities = NodeIdentity.objects.filter(subscription__entitlement=record, revoked_at__isnull=True).exclude(state='candidate')
-    if not identities.exists():
-        raise ValidationError('没有可核验的入口样本，不能清除计量缺口')
-    for identity in identities:
-        stream = identity.streams.filter(retired_at__isnull=True).first()
-        if stream is None:
-            raise ValidationError('仍有入口没有可靠计量样本')
-        latest = UsageLedger.objects.filter(stream=stream).order_by('-sequence').first()
-        if not latest or latest.observed_at < cycle.starts_at:
-            raise ValidationError('仍有入口缺少账期边界或新周期样本')
+    from .metering_quality import assess_metering
+    metering = assess_metering(record, cycle)
+    if metering['evidence_quality'] != 'fresh':
+        raise ValidationError('仍有入口缺少唯一当前代际的本期新鲜样本，不能清除计量缺口')
     record.metering_gap = False
     record.save(update_fields=['metering_gap'])

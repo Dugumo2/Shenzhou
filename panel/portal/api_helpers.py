@@ -1,9 +1,8 @@
 """服务查询的安全只读投影；不创建账期、交付或接入身份。"""
-from datetime import timedelta
-
 from django.db.models import Exists, OuterRef, Q
 from django.utils import timezone
 
+from .metering_quality import assess_metering
 from .models import Entitlement, Membership, SubscriptionGrant
 
 
@@ -60,14 +59,11 @@ def project_service(record, source_type, *, now=None, detail=False, administrato
         cycle = cycles[0] if len(cycles) == 1 else None
         gap = record.metering_gap or len(cycles) > 1
         observed = record.usage_updated_at
-        evidence = cycle is not None and cycle.ledger.filter(quality='metered',
-            observed_at__gte=cycle.starts_at, observed_at__lt=cycle.ends_at).exists()
-        in_cycle = (cycle is not None and observed is not None and cycle.starts_at <= observed < cycle.ends_at
-                    and observed <= now + timedelta(seconds=30) and evidence)
-        fresh = in_cycle and now - timedelta(minutes=3) <= observed <= now + timedelta(seconds=30)
-        quality = 'gap' if gap else 'measured' if fresh else 'stale' if in_cycle else 'unknown'
-        used = cycle.used_bytes if in_cycle and not gap else None
-        raw = cycle.raw_bytes if in_cycle and not gap else None
+        metering = assess_metering(record, cycle, now)
+        gap = gap or metering['quality'] == 'gap'
+        quality = 'gap' if gap else 'measured' if metering['quality'] == 'fresh' else metering['quality']
+        used = cycle.used_bytes if metering['usable'] and not gap else None
+        raw = cycle.raw_bytes if metering['usable'] and not gap else None
         applied_quota = record.applied_snapshot.get('quota_bytes') if record.applied_revision else None
         quota = applied_quota if byte_string(applied_quota) is not None else record.quota_bytes
         quota_state = 'applied' if byte_string(applied_quota) is not None else 'configured'

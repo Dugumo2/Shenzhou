@@ -26,7 +26,7 @@ class WorkspaceTests(TestCase):
     def test_anonymous_has_no_guide_or_monitor(self):
         with override_settings(MONITOR_URL='https://monitor.example.com/'):
             response = self.client.get('/login/')
-            self.assertContains(response, '行舟')
+            self.assertContains(response, '神舟云')
             self.assertNotContains(response, 'href="/guide/"')
             self.assertNotContains(response, 'monitor.example.com')
             self.assertEqual(self.client.get('/guide/').status_code, 302)

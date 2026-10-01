@@ -12,6 +12,7 @@ from django.db import OperationalError, transaction
 from django.utils import timezone
 
 from .entitlements import SHANGHAI, next_reset
+from .metering_quality import assess_metering
 from .models import BillingCycle, BillingPlan, BillingPlanRevision, Entitlement, UsageLedger
 
 PREVIEW_TTL = 600
@@ -124,13 +125,9 @@ def _context(record, now, lock=False):
 
 def _snapshot(record, now, lock=False):
     plan, cycle, anchor, next_at, reason = _context(record, now, lock)
-    # 旧期末检查点即使时间恰好等于新期起点，也不是新期计量证据。
-    measured = bool(cycle and record.usage_updated_at and
-        cycle.starts_at <= record.usage_updated_at < cycle.ends_at and
-        cycle.ledger.filter(quality='metered', observed_at__gte=cycle.starts_at, observed_at__lt=cycle.ends_at).exists())
-    known = measured and not record.metering_gap
-    fresh = known and now - timedelta(minutes=3) <= record.usage_updated_at <= now + timedelta(seconds=30)
-    quality = 'gap' if record.metering_gap else 'unknown' if not measured else 'fresh' if fresh else 'stale'
+    metering = assess_metering(record, cycle, now)
+    quality = metering['quality']
+    known = metering['usable']
     quota = record.applied_snapshot.get('quota_bytes') if record.applied_revision else None
     used = cycle.used_bytes if cycle and known else None
     return {
@@ -145,7 +142,7 @@ def _snapshot(record, now, lock=False):
             'recorded_weighted_remainder': str(cycle.weighted_remainder)} if cycle else None,
         'plan': {'next_reset_at': stamp(next_at), 'anchor_day': anchor[0], 'hour': anchor[1], 'minute': anchor[2]} if anchor else None,
         'quota_bytes': str(quota) if quota is not None else None, 'used_bytes': str(used) if used is not None else None,
-        'remaining_bytes': str(max(0, quota - used)) if fresh and used is not None and quota is not None else None,
+        'remaining_bytes': str(max(0, quota - used)) if quality == 'fresh' and used is not None and quota is not None else None,
         'usage_quality': quality, 'usage_updated_at': stamp(record.usage_updated_at),
         'expires_at': stamp(record.expires_at), 'can_modify': not reason, 'blocked_reason': reason,
     }

@@ -8,9 +8,11 @@ from urllib.parse import unquote, urlsplit
 ROOT = Path(__file__).resolve().parents[2]
 FIXED = {'.gitignore', 'README.md', 'panel/.gitignore', 'panel/README.md',
          'panel/manage.py', 'panel/requirements.txt', 'panel/requirements-dev.txt',
-         'panel/requirements-metering.txt', 'docs/panel/USER_OUTCOME_PLAN_20261001.md'}
+         'panel/requirements-metering.txt', 'panel/requirements-lock.txt',
+         '.github/workflows/check.yml', 'panel/frontend/.gitignore',
+         'docs/panel/USER_OUTCOME_PLAN_20261001.md'}
 PREFIXES = ('panel/portal/', 'panel/megabox/', 'panel/bridge/', 'panel/tests/',
-            'docs/public/', 'scripts/public/')
+            'panel/frontend/', 'docs/public/', 'scripts/public/')
 SECRET_PATTERNS = {
     '私钥正文': r'-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----',
     '服务令牌': r'(?:ctx7sk-|ghp_|github_pat_)[A-Za-z0-9_-]{20,}',
@@ -35,9 +37,14 @@ def main():
             errors.append((name, '协议生成代码尚未完成公开审查'))
         if name not in FIXED and not name.startswith(PREFIXES):
             errors.append((name, '不在公开目录范围'))
-        if any(part.startswith('.') and part != '.gitignore' for part in path.parts):
+        if any(part.startswith('.') and part != '.gitignore' for part in path.parts) and name not in FIXED:
             errors.append((name, '隐藏运行文件'))
-        if path.suffix not in {'.py', '.html', '.css', '.js', '.md', '.txt'} and name not in FIXED:
+        allowed_types = {'.py', '.html', '.css', '.js', '.md', '.txt'}
+        if name.startswith('panel/frontend/'):
+            allowed_types |= {'.ts', '.vue', '.json', '.mjs'}
+        if any(part in {'node_modules', 'dist', '.env', '.venv', '__pycache__'} for part in path.parts):
+            errors.append((name, '运行材料不应提交'))
+        if path.suffix not in allowed_types and name not in FIXED:
             errors.append((name, '未经核准的文件类型'))
         blob = git('show', ':' + name)
         if len(blob) > 2_000_000:

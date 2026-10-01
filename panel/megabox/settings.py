@@ -22,6 +22,7 @@ MIDDLEWARE = ['django.middleware.security.SecurityMiddleware', 'django.contrib.s
               'django.contrib.auth.middleware.AuthenticationMiddleware', 'django.contrib.messages.middleware.MessageMiddleware',
               'django.middleware.clickjacking.XFrameOptionsMiddleware', 'portal.middleware.ResponsePolicy']
 ROOT_URLCONF = 'megabox.urls'
+CSRF_FAILURE_VIEW = 'portal.api.csrf_failure'
 TEMPLATES = [{'BACKEND': 'django.template.backends.django.DjangoTemplates', 'APP_DIRS': True,
               'OPTIONS': {'context_processors': ['django.template.context_processors.request',
                 'django.contrib.auth.context_processors.auth', 'django.contrib.messages.context_processors.messages',
@@ -78,7 +79,9 @@ if OPERATOR_ENABLED and not PANEL_LIVE:
 
 # 新工作区先独立验收；生产显式开启，避免迁移前改变现有交付路径。
 WORKSPACE_V2 = os.environ.get('PANEL_WORKSPACE_V2') == '1'
-SITE_BRAND = os.environ.get('PANEL_SITE_BRAND', '行舟')[:60]
+SITE_BRAND = os.environ.get('PANEL_SITE_BRAND', '神舟云')[:60]
+FRONTEND_ENABLED = os.environ.get('PANEL_FRONTEND_ENABLED') == '1'
+CANDIDATE_DEMO_DATA = not PANEL_LIVE and os.environ.get('PANEL_CANDIDATE_DEMO_DATA') == '1'
 MONITOR_URL = os.environ.get('PANEL_MONITOR_URL', '')
 if MONITOR_URL:
     from urllib.parse import urlsplit
