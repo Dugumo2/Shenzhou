@@ -1,0 +1,8 @@
+{% extends 'portal/base.html' %}
+{% block title %}邀请注册{% endblock %}
+{% block content %}
+<div class="auth-layout register-layout">
+  <section class="auth-intro"><span class="eyebrow">A SPACE FOR YOU</span><h1>受邀而来，<br><span>从容开始。</span></h1><p>填写管理员提供的邀请码，创建你自己的账号。<br>注册后，由管理员分配套餐与线路。</p><div class="intro-steps"><div><span>01</span><p><strong>创建账号</strong><small>设置自己的用户名和密码</small></p></div><div><span>02</span><p><strong>等待分配</strong><small>管理员设置线路、额度和有效期</small></p></div><div><span>03</span><p><strong>开始连接</strong><small>按你的设备选择相应指南</small></p></div></div></section>
+  <section class="card auth-card"><span class="eyebrow">仅限邀请</span><h2>创建你的账号</h2><p class="muted">本站不开放无邀请码注册。</p><form method="post" class="stack-form">{% csrf_token %}{% include 'portal/form_fields.html' with form=form %}<button type="submit" class="button primary full-width">创建账号 <span aria-hidden="true">→</span></button></form><div class="auth-switch">已有账号？<a href="/login/">返回登录</a></div></section>
+</div>
+{% endblock %}

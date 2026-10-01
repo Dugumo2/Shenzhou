@@ -1,0 +1,1 @@
+{% if status == 'active' or status == 'running' %}运行中{% elif status == 'inactive' or status == 'stopped' %}已停止{% elif status == 'failed' %}故障{% elif status == 'activating' %}启动中{% elif status == 'deactivating' %}停止中{% elif not status %}未提供{% else %}等待核对{% endif %}

@@ -1,0 +1,2 @@
+# 仅生成已核验 proto 的 Python 客户端，不部署编译工具。
+grpcio-tools==1.84.0

@@ -1,0 +1,7 @@
+{% extends 'portal/base.html' %}
+{% block title %}我的服务{% endblock %}
+{% block content %}
+<div class="page-heading"><div><span class="eyebrow">我的空间</span><h1>我的服务</h1><p>套餐、线路和设备配置，都在同一份服务中管理。</p></div><a class="button secondary" href="/guide/">使用指南 →</a></div>
+<div class="service-grid">{% for service in services %}<article class="card service-card"><div class="card-heading"><div><span class="eyebrow">我的连接</span><h2>{{ service.name|default:'连接服务' }}</h2></div><span class="badge neutral">{{ service.status_label }}</span></div><div class="service-card-amount"><strong>{% if service.quota_gb != None %}{{ service.quota_gb }}{% else %}—{% endif %}</strong><span>GB / 月</span></div><p class="muted">{% if service.is_measured %}已扣减 {{ service.used_gb }} GB · 剩余 {{ service.remaining_gb }} GB{% else %}用量尚未核验{% endif %}</p><div class="line-pills">{% for line in service.lines %}<span class="line-pill">{{ line.name }}</span>{% endfor %}</div><div class="service-card-foot"><span>到期 {{ service.expires_at|date:'Y-m-d'|default:'开通后计算' }}</span><a class="button primary" href="{{ service.detail_url }}">进入服务 →</a></div></article>{% empty %}{% if not legacy_service and not legacy_service_url %}<section class="card empty-state wide"><span class="empty-symbol">⌁</span><h2>暂时没有服务</h2><p>注册成功后，你会拥有账号。管理员为你开通服务后，套餐、线路与客户端配置才会出现在这里。</p><a class="button secondary" href="/account/">查看账号</a></section>{% endif %}{% endfor %}</div>
+{% include 'portal/v2_legacy_links.html' %}
+{% endblock %}

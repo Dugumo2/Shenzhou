@@ -1,0 +1,34 @@
+{% extends 'portal/base.html' %}
+{% block title %}邀请注册{% endblock %}
+{% block content %}
+{% now 'Y-m-d H:i:s' as current_invite_time %}
+<div class="page-heading"><div><span class="eyebrow">INVITATIONS</span><h1>邀请值得信任的人</h1><p>创建邀请码，由受邀用户自行设置用户名和密码。</p></div></div>
+{% if created_code %}<section class="card created-invite"><div class="card-heading"><h2>邀请码已生成</h2><span class="badge success">仅本次显示</span></div><p>请复制后，通过你信任的私密渠道交给受邀人。页面刷新后不再显示完整邀请码。</p><div class="secret-field"><input id="created-invite-code" type="password" readonly value="{{ created_code }}" autocomplete="off" aria-label="新生成的邀请码"><button type="button" class="button secondary small-button" data-reveal="created-invite-code" aria-controls="created-invite-code" aria-pressed="false">显示</button><button type="button" class="button primary small-button" data-copy="created-invite-code">复制邀请码</button></div></section>{% endif %}
+<div class="two-columns form-and-aside"><section class="card"><div class="card-heading"><h2>创建邀请</h2><span class="badge neutral">管理员</span></div><form method="post" class="stack-form">{% csrf_token %}{% include 'portal/form_fields.html' with form=form %}<button class="button primary" type="submit">生成邀请码 <span aria-hidden="true">＋</span></button></form></section><aside class="card soft-card"><span class="eyebrow">如何使用</span><h2>简单的三步</h2><ol class="numbered-list"><li>为受邀人生成邀请码，设置使用次数和有效期。</li><li>将邀请码和本站注册地址私下交给对方。</li><li>注册完成后，进入“用户管理 → 用户详情 → 开通服务”，设置线路、额度和有效期；用户再从自己的服务获取配置。</li></ol><p class="small muted">邀请码只提供注册资格，不自动开通服务或分配额度。</p></aside></div>
+<section class="card table-card">
+  <div class="table-caption"><h2>邀请记录</h2><span class="muted small">完整邀请码不在列表展示</span></div>
+  <div class="table-scroll">
+    <table>
+      <thead><tr><th scope="col">备注</th><th scope="col">已使用 / 可用次数</th><th scope="col">有效期至</th><th scope="col">创建时间</th><th scope="col">状态</th><th scope="col">操作</th></tr></thead>
+      <tbody>
+        {% for invitation in invitations %}
+        <tr>
+          <td><strong>{{ invitation.label|default:'未填写备注' }}</strong></td>
+          <td>{{ invitation.uses|default:0 }} / {{ invitation.max_uses|default:'—' }}</td>
+          <td>{{ invitation.expires_at|date:'Y-m-d H:i'|default:'未设置' }}</td>
+          <td>{{ invitation.created_at|date:'Y-m-d H:i'|default:'—' }}</td>
+          <td>
+            {% if invitation.revoked %}<span class="badge neutral">已撤销</span>
+            {% elif invitation.expires_at|date:'Y-m-d H:i:s' <= current_invite_time %}<span class="badge neutral">已过期</span>
+            {% elif invitation.uses >= invitation.max_uses %}<span class="badge neutral">已用完</span>
+            {% else %}<span class="badge success">可使用</span>{% endif %}
+          </td>
+          <td>{% if not invitation.revoked %}<form method="post" action="/manage/invites/{{ invitation.id }}/revoke/">{% csrf_token %}<button class="button danger small-button" type="submit" aria-label="撤销邀请码：{{ invitation.label|default:'未填写备注' }}">撤销</button></form>{% else %}<span class="muted">—</span>{% endif %}</td>
+        </tr>
+        {% empty %}<tr><td colspan="6"><div class="empty-state compact"><h3>暂无邀请记录</h3><p>创建第一份邀请后，会显示在这里。</p></div></td></tr>{% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+<p class="small muted bottom-note">撤销后，该邀请码不能再用于注册；已经注册的账号不会因此停用。</p>
+{% endblock %}

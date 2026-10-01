@@ -1,0 +1,19 @@
+{% extends 'portal/base.html' %}
+{% block title %}创建用户{% endblock %}
+{% block content %}
+<a class="back-link" href="/manage/users/">← 返回用户列表</a>
+  <div class="page-heading"><div><span class="eyebrow">NEW MEMBER</span><h1>为新用户准备账号</h1><p>这里只创建登录账号，不附带服务。创建后进入该用户详情，单独开通线路、额度与有效期。</p></div></div>
+{% if initial_password %}
+<section class="card created-invite">
+  <div class="card-heading"><h2>账号已创建</h2><span class="badge success">初始密码仅本次显示</span></div>
+  <p>账号名称：<strong>{{ created_username }}</strong>。请复制初始密码，通过可信的私密渠道交给用户，并提醒其登录后在“账号设置”中修改密码。</p>
+  <div class="secret-field"><input id="initial-user-password" type="password" readonly value="{{ initial_password }}" autocomplete="off" spellcheck="false" aria-label="新用户初始密码"><button type="button" class="button secondary small-button" data-reveal="initial-user-password" aria-controls="initial-user-password" aria-pressed="false">显示</button><button type="button" class="button primary small-button" data-copy="initial-user-password">复制密码</button></div>
+  <p class="small muted bottom-note">离开页面后不能再次查看此密码。网站账号可以登录，套餐与节点仍处于待开通状态。</p>
+  <div class="button-row bottom-note"><a class="button secondary" href="{% if workspace_v2 %}/manage/allocations/?user={{ created_user_id }}{% else %}/manage/users/{{ created_user_id }}/{% endif %}">分配套餐</a><a class="button secondary" href="/manage/users/">返回用户列表</a></div>
+</section>
+{% endif %}
+<div class="two-columns form-and-aside">
+  <section class="card"><div class="card-heading"><h2>{% if initial_password %}继续创建其他用户{% else %}填写账号信息{% endif %}</h2><span class="badge neutral">普通用户</span></div><form method="post" class="stack-form">{% csrf_token %}{% include 'portal/form_fields.html' with form=form %}<button class="button primary" type="submit">创建账号并生成密码 <span aria-hidden="true">＋</span></button></form></section>
+  <aside class="card soft-card"><span class="eyebrow">创建之后</span><h2>先有账号，再开通连接</h2><ol class="numbered-list"><li>系统随机生成初始密码，完整密码仅在创建成功的本次页面显示。</li><li>将账号与密码私下交给用户。用户可在账号设置中自行修改。</li><li>管理员完成套餐与服务器配置应用后，用户才能获得已发布的可用订阅。</li></ol><p class="small muted">这里创建的账号没有管理员权限。待开通期间不提前消耗套餐有效期，也不会创建真实节点凭据。</p></aside>
+</div>
+{% endblock %}

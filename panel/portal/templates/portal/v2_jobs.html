@@ -1,0 +1,6 @@
+{% extends 'portal/base.html' %}
+{% block title %}操作记录{% endblock %}
+{% block content %}
+<div class="page-heading"><div><a class="breadcrumb" href="/manage/operations/">← 服务运维</a><h1>操作记录</h1><p>查看服务应用、配置生成和撤销的实际进度。</p></div><a href="/manage/jobs/" class="button secondary">刷新状态</a></div>
+<section class="card table-card"><div class="table-scroll"><table><thead><tr><th>任务</th><th>状态</th><th>提交时间</th><th>结果</th><th>操作</th></tr></thead><tbody>{% for job in jobs %}<tr><td><strong>{{ job.action_label|default:job.action }}</strong><small class="table-subtext">{{ job.public_id }}</small></td><td><span class="badge neutral">{{ job.state_label }}</span></td><td>{{ job.created_at|date:'m-d H:i' }}</td><td>{{ job.result_message|default:job.result_code|default:'等待执行回执' }}{% if job.impact_message %}<small class="table-subtext">{{ job.impact_message }}</small>{% endif %}</td><td>{% if job.can_retry %}<form method="post" action="/manage/jobs/{{ job.public_id }}/retry/">{% csrf_token %}<button class="button secondary small-button" type="submit">重试</button></form>{% else %}—{% endif %}</td></tr>{% empty %}<tr><td colspan="5"><div class="empty-state compact"><h3>还没有任务</h3><p>提交套餐分配或订阅操作后，这里会保留执行记录。</p></div></td></tr>{% endfor %}</tbody></table></div></section>
+{% endblock %}

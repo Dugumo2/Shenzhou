@@ -1,0 +1,8 @@
+{% extends 'portal/base.html' %}
+{% block title %}登录{% endblock %}
+{% block content %}
+<div class="auth-layout">
+  <section class="auth-intro"><span class="eyebrow">欢迎回来</span><h1>欢迎回来。<br><span>连接你的日常。</span></h1><p>管理自己的订阅、查看分配额度，<br>让电脑和手机的设置都有据可循。</p><div class="auth-illustration" aria-hidden="true"><div class="orbit orbit-one"></div><div class="orbit orbit-two"></div><span class="orbit-center">舟</span><span class="orbit-dot dot-one"></span><span class="orbit-dot dot-two"></span><span class="orbit-tag tag-home">电脑</span><span class="orbit-tag tag-bwh">手机</span></div></section>
+  <section class="card auth-card"><span class="eyebrow">你的个人空间</span><h2>登录 {{ site_brand|default:'行舟' }}</h2><p class="muted">使用管理员邀请注册的账号继续。</p><form method="post" class="stack-form">{% csrf_token %}{% include 'portal/form_fields.html' with form=form %}{% if next %}<input type="hidden" name="next" value="{{ next }}">{% endif %}<button type="submit" class="button primary full-width">登录账号 <span aria-hidden="true">→</span></button></form><div class="auth-switch">还没有账号？<a href="/register/">使用邀请码注册</a></div><p class="small muted">忘记密码时请联系管理员协助处理。</p></section>
+</div>
+{% endblock %}

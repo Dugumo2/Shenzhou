@@ -1,0 +1,65 @@
+{% load static %}
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>{% block title %}总览{% endblock %} · {{ site_brand|default:'行舟' }}</title>
+  <link rel="stylesheet" href="{% static 'portal/portal.css' %}">
+  <link rel="stylesheet" href="{% static 'portal/v2.css' %}">
+  <script src="{% static 'portal/portal.js' %}" defer></script>
+  <script src="{% static 'portal/v2.js' %}" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">跳到主要内容</a>
+  <div class="app-shell">
+    <aside class="sidebar" aria-label="主导航">
+      <a class="brand" href="/"><span class="brand-mark" aria-hidden="true">舟<span></span></span><span>{{ site_brand|default:'行舟' }}<small>连接管理</small></span></a>
+      <nav class="navigation">
+        {% if request.user.is_authenticated %}
+        <span class="nav-label">我的空间</span>
+        {% if not workspace_v2 %}<a href="/" {% if request.path == '/' %}aria-current="page"{% endif %}><span class="nav-icon" aria-hidden="true">◫</span>总览</a>{% endif %}
+        <a href="/subscriptions/" {% if request.path == '/subscriptions/' or '/services/' in request.path or request.path == '/nodes/' or workspace_v2 and request.path == '/' %}aria-current="page"{% endif %}><span class="nav-icon" aria-hidden="true">⌁</span>{% if workspace_v2 %}我的服务{% else %}我的订阅{% endif %}</a>
+        <a href="/guide/" {% if request.path == '/guide/' %}aria-current="page"{% endif %}><span class="nav-icon" aria-hidden="true">▤</span>使用指南</a>
+        <a href="/account/" {% if request.path == '/account/' %}aria-current="page"{% endif %}><span class="nav-icon" aria-hidden="true">◎</span>账号设置</a>
+        {% if request.user.is_staff %}
+        <span class="nav-label admin-label">管理空间</span>
+        {% if workspace_v2 %}<a href="/manage/allocations/" {% if request.path == '/manage/allocations/' %}aria-current="page"{% endif %}><span class="nav-icon" aria-hidden="true">↗</span>服务与订阅</a>
+        <a href="/manage/resources/" {% if request.path == '/manage/resources/' %}aria-current="page"{% endif %}><span class="nav-icon" aria-hidden="true">▣</span>服务器与线路</a>
+        <a href="/manage/capacity/" {% if request.path == '/manage/capacity/' %}aria-current="page"{% endif %}><span class="nav-icon" aria-hidden="true">◫</span>资源容量</a>{% else %}<a href="/manage/subscriptions/" {% if request.path == '/manage/subscriptions/' %}aria-current="page"{% endif %}><span class="nav-icon" aria-hidden="true">↗</span>订阅管理</a>{% endif %}
+        <a href="/manage/users/" {% if '/manage/users/' in request.path %}aria-current="page"{% endif %}><span class="nav-icon" aria-hidden="true">♧</span>用户管理</a>
+        <a href="/manage/invites/" {% if request.path == '/manage/invites/' %}aria-current="page"{% endif %}><span class="nav-icon" aria-hidden="true">◇</span>邀请注册</a>
+        <a href="/manage/operations/" {% if request.path == '/manage/operations/' or request.path == '/manage/jobs/' %}aria-current="page"{% endif %}><span class="nav-icon" aria-hidden="true">⌘</span>服务运维</a>
+        <a href="/manage/client-routing/" {% if '/manage/client-routing/' in request.path or '/manage/client-direct/' in request.path %}aria-current="page"{% endif %}><span class="nav-icon" aria-hidden="true">↳</span>代理规则</a>
+        {% if monitor_url %}<a href="{{ monitor_url }}" target="_blank" rel="noopener noreferrer"><span class="nav-icon" aria-hidden="true">↗</span>服务器监控<span class="external-label">独立站点</span></a>{% endif %}
+        {% endif %}
+        {% else %}
+        <a href="/login/" {% if request.path == '/login/' %}aria-current="page"{% endif %}><span class="nav-icon" aria-hidden="true">↗</span>登录</a>
+        <a href="/register/" {% if request.path == '/register/' %}aria-current="page"{% endif %}><span class="nav-icon" aria-hidden="true">◇</span>凭邀请加入</a>
+        {% endif %}
+      </nav>
+      <div class="sidebar-note"><span class="little-line"></span><p>一份服务<br>连接你的日常</p>{% if not is_live %}<p class="sidebar-environment">本地候选 · 尚未上线</p>{% endif %}</div>
+    </aside>
+    <div class="main-shell">
+      <header class="topbar">
+        <span class="topbar-label">个人连接管理</span>
+        <div class="topbar-actions">
+          {% if is_live %}<span class="badge neutral">已发布面板</span>{% else %}<span class="badge warning">本地候选 · 未上线</span>{% endif %}
+          {% if request.user.is_authenticated %}
+          <a class="profile-link" href="/account/"><span class="avatar" aria-hidden="true">{{ request.user.username|first|upper }}</span><span class="username">{{ request.user.username }}</span></a>
+          <form method="post" action="/logout/">{% csrf_token %}<button class="text-button" type="submit">退出</button></form>
+          {% endif %}
+        </div>
+      </header>
+      <main id="main" class="main-content">
+        {% if workspace_v2 and not is_live %}<div class="notice tight"><span class="notice-mark" aria-hidden="true">i</span><p><strong>本地隔离预览</strong> · 套餐与用量为测试数据，生成任务不会交付生产节点。</p></div>{% endif %}
+        {% if messages %}<div class="messages" aria-live="polite">{% for message in messages %}<div class="message {{ message.tags }}">{{ message }}</div>{% endfor %}</div>{% endif %}
+        {% block content %}{% endblock %}
+      </main>
+      <footer class="footer"><span>{{ site_brand|default:'行舟' }} · 连接管理</span><span>设备上的连接状态以客户端为准</span></footer>
+    </div>
+  </div>
+  <div id="copy-feedback" class="toast" role="status" aria-live="polite" hidden></div>
+</body>
+</html>

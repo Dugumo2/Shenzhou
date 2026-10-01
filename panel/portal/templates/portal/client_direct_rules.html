@@ -1,0 +1,23 @@
+{% extends 'portal/base.html' %}
+{% block title %}代理规则{% endblock %}
+{% block content %}
+<div class="page-heading"><div><span class="eyebrow">CLIENT ROUTING</span><h1>代理规则</h1><p>按域名决定规则模式下走当前代理或本机直连；全局模式仍走所选节点。</p></div><span class="badge warning">候选 · 设备未更新</span></div>
+<div class="notice tight"><span class="notice-mark" aria-hidden="true">i</span><p>这里编辑的是<strong>客户端域名路由</strong>，不是 DNS 解析服务器。代理规则优先于直连规则，受保护的 AI、Google、金融及管理域名不能设为直连。保存后会进入固定发布器审核并生成下一版订阅；设备仍需按客户端的订阅更新动作拉取，失败会保留上一版。</p></div>
+{% if legacy_rules_loaded %}<div class="notice tight"><span class="notice-mark">i</span><p>已载入原规则副本。来源：{{ legacy_rules_source|default:'已核验只读清单' }}。预览编辑不会直接改变正在使用的客户端。</p></div>{% elif not is_live and not rules %}<div class="notice warning"><span class="notice-mark">!</span><p>本地预览尚未加载线上规则清单。下方为空只代表隔离库没有候选规则，不代表你原有的线上规则已删除；搜索结果也不覆盖线上规则。</p></div>{% endif %}
+{% if publish_status %}<div class="notice tight"><span class="notice-mark" aria-hidden="true">i</span><p>当前清单发布状态：<strong>{% if publish_status.state == 'succeeded' %}已生成订阅{% elif publish_status.state == 'failed' %}发布失败，仍使用上一版{% else %}处理中{% endif %}</strong>{% if publish_status.version %}（版本已记录）{% endif %}</p></div>{% endif %}
+<div class="two-columns form-and-aside">
+  <section class="card"><div class="card-heading"><h2>{% if editing %}编辑规则 #{{ editing.pk }}{% else %}添加域名规则{% endif %}</h2></div>
+    <form method="post" class="stack-form">{% csrf_token %}<input type="hidden" name="action" value="save">{% if editing %}<input type="hidden" name="rule_id" value="{{ editing.pk }}">{% endif %}{% include 'portal/form_fields.html' with form=form %}<button class="button primary" type="submit">保存候选</button>{% if editing %}<a class="button secondary" href="{% url 'client_direct_rules' %}">取消编辑</a>{% endif %}</form>
+  </section>
+  <aside class="card soft-card"><span class="eyebrow">SEARCH &amp; MATCH</span><h2>搜索与匹配预览</h2><p class="muted">输入完整域名，查看命中的代理／直连规则、父域和已配置子域；这里只模拟本页候选，不代表设备当前结果。</p>
+    <form method="post" class="stack-form">{% csrf_token %}<input type="hidden" name="action" value="preview"><label for="preview-domain">待检查域名</label><input id="preview-domain" name="domain" type="text" placeholder="api.example.com" value="{{ preview.domain|default:'' }}" required><button class="button secondary" type="submit">搜索并检查命中</button></form>
+    {% if preview %}<p><strong>{{ preview.domain }}</strong>：{% if preview.result == 'protected_proxy' %}受保护，走当前代理{% elif preview.result == 'proxy_candidate' %}命中代理候选 #{{ preview.matched_id }}{% elif preview.result == 'local_direct_candidate' %}命中直连候选 #{{ preview.matched_id }}{% else %}未命中本页规则{% endif %}</p>
+      {% if preview.related %}<ul class="plain-list">{% for item in preview.related %}<li>#{{ item.id }} · {{ item.relation }} · {% if item.action == 'proxy' %}代理{% else %}直连{% endif %} · <code>{{ item.value }}</code>{% if not item.enabled %}（已停用）{% endif %}</li>{% endfor %}</ul>{% if preview.related_truncated %}<p class="small muted">仅显示前 100 条相关规则。</p>{% endif %}{% else %}<p class="small muted">没有相关的已保存域名或子域名规则。</p>{% endif %}
+    {% endif %}
+    <p class="muted small">候选摘要：<code>{{ digest }}</code></p><a class="button secondary" href="{% url 'client_direct_policy_export' %}">下载完整规则候选</a> <a class="button secondary" href="{% url 'client_direct_export' %}">直连规则源</a> <a class="button secondary" href="{% url 'client_proxy_export' %}">代理规则源</a>
+  </aside>
+</div>
+<section class="card table-card"><div class="table-caption"><h2>规则列表</h2><span class="muted small">相同类型和域名不能重复；保存后自动排队生成订阅。</span></div>
+  <div class="table-scroll"><table><thead><tr><th>走向</th><th>匹配方式</th><th>表达式</th><th>作用域</th><th>状态</th><th>操作</th></tr></thead><tbody>{% for rule in rules %}<tr><td><strong>{{ rule.get_outbound_display }}</strong></td><td>{{ rule.get_kind_display }}</td><td><code>{{ rule.value }}</code></td><td>{{ rule.scope_domain|default:'—' }}</td><td>{% if rule.enabled %}<span class="badge success">候选启用</span>{% else %}<span class="badge neutral">停用</span>{% endif %}</td><td><a href="?edit={{ rule.pk }}">编辑</a> <details><summary>删除</summary><form method="post">{% csrf_token %}<input type="hidden" name="action" value="delete"><input type="hidden" name="rule_id" value="{{ rule.pk }}"><input type="hidden" name="revision" value="{{ rule.revision }}"><input type="hidden" name="confirm" value="yes"><button type="submit" class="button danger small-button">确认删除候选</button></form></details></td></tr>{% empty %}<tr><td colspan="6">暂无规则。</td></tr>{% endfor %}</tbody></table></div>
+</section>
+{% endblock %}

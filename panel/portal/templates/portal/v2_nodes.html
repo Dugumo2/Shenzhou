@@ -1,0 +1,6 @@
+{% extends 'portal/base.html' %}
+{% block title %}我的节点{% endblock %}
+{% block content %}
+<div class="page-heading"><div><span class="eyebrow">我的空间</span><h1>协议节点</h1><p>节点是服务的协议入口；不同格式把这些入口整理成客户端配置。</p></div><a class="button primary" href="/subscriptions/">返回我的服务 →</a></div>
+<div class="node-grid">{% for node in nodes %}<article class="card"><div class="card-heading"><h2>{{ node.name }}</h2><span class="badge neutral">{{ node.protocol_label|default:node.protocol }}</span></div><dl class="detail-list"><div><dt>所属线路</dt><dd>{{ node.line_name }}</dd></div><div><dt>状态</dt><dd>{{ node.state_label|default:'尚未验证' }}</dd></div></dl><p class="small muted">{{ node.description }}</p></article>{% empty %}<section class="card empty-state wide"><span class="empty-symbol">⌁</span><h2>还没有已授权节点</h2><p>管理员分配线路并完成应用后，这里会展示属于你的节点。</p></section>{% endfor %}</div>
+{% endblock %}
