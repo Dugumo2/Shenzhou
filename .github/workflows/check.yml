@@ -4,9 +4,12 @@ on:
   pull_request:
 permissions:
   contents: read
+env:
+  PYTHONUTF8: '1'
 jobs:
   backend:
     strategy:
+      fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
