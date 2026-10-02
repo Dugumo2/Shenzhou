@@ -3,7 +3,8 @@ from django.db.models import Exists, OuterRef, Q
 from django.utils import timezone
 
 from .metering_quality import assess_metering
-from .models import Entitlement, Membership, SubscriptionGrant
+from .legacy_binding import legacy_service_memberships, verified_legacy_bindings
+from .models import Entitlement, LegacyServiceBinding
 
 
 CLIENTS = (
@@ -34,13 +35,26 @@ def byte_string(value):
 
 def legacy_services():
     """邀请码注册的零额度待开通占位记录不是服务。"""
-    return Membership.objects.annotate(has_grants=Exists(
-        SubscriptionGrant.objects.filter(membership_id=OuterRef('pk')))).filter(
-            Q(quota_bytes__gt=0) | Q(has_grants=True) | ~Q(status='pending') | Q(expires_at__isnull=False))
+    return legacy_service_memberships()
+
+
+def visible_legacy_services():
+    """仅显式核验的独立旧服务可与权益并列；坏绑定不得退回未绑定路径。"""
+    return legacy_services().annotate(
+        has_binding=Exists(LegacyServiceBinding.objects.filter(membership_id=OuterRef('pk'))),
+        independent_verified=Exists(verified_legacy_bindings().filter(
+            membership_id=OuterRef('pk'), entitlement__isnull=True)),
+        has_entitlement=Exists(Entitlement.objects.filter(user_id=OuterRef('user_id'))),
+    ).filter(Q(has_binding=False, has_entitlement=False) | Q(independent_verified=True))
 
 
 def compatibility_for(user_id, has_entitlement):
-    unresolved = has_entitlement and legacy_services().filter(user_id=user_id).exists()
+    members = legacy_services().filter(user_id=user_id)
+    has_target = has_entitlement or Entitlement.objects.filter(user_id=user_id).exists()
+    unresolved_members = members.exclude(pk__in=verified_legacy_bindings().values('membership_id'))
+    if not has_target:
+        unresolved_members = unresolved_members.filter(legacy_binding__isnull=False)
+    unresolved = unresolved_members.exists()
     return {'state': 'mapping_required' if unresolved else 'clear',
             'message': '部分服务资料尚需管理员核对；暂不合并或增加额度。' if unresolved else None}
 

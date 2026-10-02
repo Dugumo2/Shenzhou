@@ -16,7 +16,8 @@ from django.views.csrf import csrf_failure as html_csrf_failure
 from django.views.decorators.debug import sensitive_variables
 
 from .api_helpers import (CLIENTS, client_catalog, compatibility_for, iso,
-                          legacy_services, project_service, service_queryset)
+                          legacy_services, project_service, service_queryset, visible_legacy_services)
+from .legacy_binding import verified_legacy_bindings
 from .client_rules import PROTECTED, policy_document, validate_rule
 from .models import ClientDirectRule, Entitlement, Membership
 from .services import audit, throttle
@@ -131,9 +132,10 @@ def logout(request):
 @endpoint()
 def my_services(request):
     record = service_queryset().filter(user=request.user).first()
-    legacy = legacy_services().select_related('user').filter(user=request.user).first()
-    items = ([project_service(record, 'entitlement')] if record else
-             [project_service(legacy, 'membership')] if legacy else [])
+    legacy = visible_legacy_services().select_related('user').filter(user=request.user).first()
+    items = [project_service(record, 'entitlement')] if record else []
+    if legacy is not None:
+        items.append(project_service(legacy, 'membership'))
     return success({'items': items, 'service_count': len(items),
                     'compatibility': compatibility_for(request.user.pk, record is not None)})
 
@@ -147,9 +149,11 @@ def my_service_detail(request, public_id):
     record = service_queryset().filter(user=request.user, public_id=value).first()
     if record is not None:
         return success(project_service(record, 'entitlement', detail=True))
-    # 两条链并存时，需要先明确归属映射，不能通过详情 URL 绕过列表凭空增加服务。
-    legacy = None if Entitlement.objects.filter(user=request.user).exists() else legacy_services().select_related(
-        'user').filter(user=request.user, public_id=value).first()
+    # 已核验合并的旧UUID指向同一目标投影，未核验或坏绑定不能通过详情绕过列表。
+    binding = verified_legacy_bindings().filter(owner=request.user, membership__public_id=value).first()
+    if binding is not None and binding.entitlement_id is not None:
+        return success(project_service(binding.entitlement, 'entitlement', detail=True))
+    legacy = visible_legacy_services().select_related('user').filter(user=request.user, public_id=value).first()
     if legacy is None:
         return error('not_found', '服务不存在或不可访问。', 404)
     return success(project_service(legacy, 'membership', detail=True))
@@ -200,10 +204,12 @@ def admin_services(request):
         return error('invalid_filter', '搜索或状态筛选无效。', 422)
     now = timezone.now()
     entitlements = service_queryset()
-    memberships = legacy_services().exclude(user_id__in=Entitlement.objects.values('user_id'))
+    memberships = visible_legacy_services()
     if q:
         search = Q(user__username__icontains=q) | Q(public_id__icontains=q.replace('-', ''))
-        entitlements, memberships = entitlements.filter(search), memberships.filter(search)
+        old_targets = verified_legacy_bindings().filter(
+            membership__public_id__icontains=q.replace('-', '')).values('entitlement_id')
+        entitlements, memberships = entitlements.filter(search | Q(pk__in=old_targets)), memberships.filter(search)
     if state == 'expired':
         entitlements, memberships = entitlements.filter(expires_at__lte=now), memberships.filter(expires_at__lte=now)
     elif state == 'metering_gap':
@@ -227,11 +233,14 @@ def admin_services(request):
     current = list(page.object_list)
     records = {('entitlement', row.pk): row for row in service_queryset().filter(
         pk__in=[value['pk'] for value in current if value['source_type'] == 'entitlement'])}
-    records.update({('membership', row.pk): row for row in Membership.objects.select_related('user').filter(
+    records.update({('membership', row.pk): row for row in visible_legacy_services().select_related('user').filter(
         pk__in=[value['pk'] for value in current if value['source_type'] == 'membership'])})
     items = []
     for row in current:
-        record = records[(row['source_type'], row['pk'])]
+        record = records.get((row['source_type'], row['pk']))
+        if record is None:
+            # 索引分页后绑定被撤销时关闭该行，不能从旧索引恢复已失效服务。
+            continue
         value = project_service(record, row['source_type'], now=now, administrator=True)
         value['user'] = {'username': record.user.get_username()}
         value['compatibility'] = compatibility_for(record.user_id, row['source_type'] == 'entitlement')

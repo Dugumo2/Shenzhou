@@ -426,3 +426,52 @@ class CapacityAlert(models.Model):
 
     class Meta:
         constraints = [models.UniqueConstraint(fields=['pool', 'code'], name='unique_capacity_alert')]
+
+
+class LegacyServiceBinding(models.Model):
+    """旧会员归属的显式核验；不储存额度、凭据或交付正文。"""
+    membership = models.OneToOneField(Membership, on_delete=models.PROTECT, related_name='legacy_binding')
+    owner = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name='legacy_service_bindings')
+    entitlement = models.ForeignKey(Entitlement, null=True, blank=True, on_delete=models.PROTECT,
+                                    related_name='legacy_bindings')
+    evidence_sha256 = models.CharField(max_length=64)
+    revision = models.PositiveIntegerField(default=1)
+    membership_revision = models.PositiveIntegerField()
+    state = models.CharField(max_length=12, default='unverified', choices=[
+        ('unverified', '未核验'), ('verified', '已核验'), ('revoked', '已撤销')])
+    verified_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True,
+                                   on_delete=models.PROTECT, related_name='verified_legacy_bindings')
+    verified_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def clean(self):
+        import re
+        from django.core.exceptions import ValidationError
+        errors = {}
+        if not re.fullmatch(r'[a-f0-9]{64}', self.evidence_sha256 or ''):
+            errors['evidence_sha256'] = '核验依据必须是64位小写SHA256摘要。'
+        if self.membership_id:
+            member = self.membership
+            if self.owner_id != member.user_id:
+                errors['owner'] = '绑定归属必须与旧会员一致。'
+            if not (member.quota_bytes > 0 or member.grants.exists() or member.status != 'pending'
+                    or member.expires_at is not None):
+                errors['membership'] = '待开通的注册占位不是服务。'
+            if self.state == 'verified' and self.membership_revision != member.revision:
+                errors['membership_revision'] = '旧会员来源已变化，请重新核验。'
+        if self.entitlement_id and self.entitlement.user_id != self.owner_id:
+            errors['entitlement'] = '目标权益必须属于同一账号。'
+        if self.state == 'verified' and (self.verified_at is None or self.verified_by_id is None
+                or not self.verified_by.is_active or not self.verified_by.is_staff):
+            errors['state'] = '有效绑定必须有管理员及核验时间。'
+        if errors:
+            raise ValidationError(errors)
+
+    class Meta:
+        constraints = [
+            models.CheckConstraint(condition=models.Q(revision__gte=1), name='legacy_binding_positive_revision'),
+            models.CheckConstraint(condition=models.Q(membership_revision__gte=1), name='legacy_binding_source_revision'),
+            models.CheckConstraint(condition=models.Q(state__in=['unverified', 'verified', 'revoked']),
+                                   name='legacy_binding_known_state'),
+        ]
