@@ -203,6 +203,45 @@ class LegacyBindingTests(TestCase):
         User.objects.filter(pk=self.admin.pk).update(is_staff=False)
         self.assertEqual(self.data('/api/v1/me/services')['items'], [])
 
+    def test_stale_administrator_object_cannot_bypass_demotion(self):
+        member = self.membership()
+        User.objects.filter(pk=self.admin.pk).update(is_staff=False)
+        self.assertTrue(self.admin.is_staff)
+        with self.assertRaises(PermissionDenied):
+            self.verify(member)
+        self.assertFalse(LegacyServiceBinding.objects.exists())
+
+    def test_changed_source_owner_cannot_fall_back_to_unverified_old_service(self):
+        member, target = self.membership(), self.entitlement()
+        self.verify(member)
+        Membership.objects.filter(pk=member.pk).update(user_id=self.other.pk)
+        self.assertEqual([row['id'] for row in self.data('/api/v1/me/services')['items']], [str(target.public_id)])
+        self.client.force_login(self.other)
+        self.assertEqual(self.data('/api/v1/me/services')['items'], [])
+        self.assertEqual(self.data('/api/v1/me/services')['compatibility']['state'], 'mapping_required')
+        self.assertEqual(self.client.get('/api/v1/me/services/' + str(member.public_id)).status_code, 404)
+
+    def test_bad_binding_is_also_excluded_from_admin_filters_and_pagination(self):
+        member, target = self.membership(), self.entitlement()
+        binding = self.verify(member)
+        LegacyServiceBinding.objects.filter(pk=binding.pk).update(owner_id=self.other.pk)
+        self.client.force_login(self.admin)
+        data = self.data('/api/v1/admin/services?q=本人假账号&page_size=1')
+        self.assertEqual(data['pagination']['total'], 1)
+        self.assertEqual(data['items'][0]['id'], str(target.public_id))
+        self.assertEqual(data['items'][0]['compatibility']['state'], 'mapping_required')
+        self.assertEqual(self.data('/api/v1/admin/services?q=' + str(member.public_id))['pagination']['total'], 0)
+
+    def test_membership_formats_do_not_create_services_or_change_grants(self):
+        member, target = self.membership(), self.entitlement()
+        for device in ('windows', 'android', 'v2rayng'):
+            SubscriptionGrant.objects.create(membership=member, device=device, version=3)
+        before = self.counts()
+        self.verify(member, target)
+        self.assertEqual(self.data('/api/v1/me/services')['service_count'], 1)
+        self.assertEqual(set(member.grants.values_list('version', flat=True)), {3})
+        self.assertEqual(before, self.counts())
+
     def test_queries_do_not_write_or_export_verification_metadata(self):
         member, target = self.membership(), self.entitlement()
         self.verify(member)

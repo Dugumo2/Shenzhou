@@ -1,5 +1,6 @@
 """本地管理员核验旧会员映射；查询仅投影已核验且未失效的关系。"""
 from django.conf import settings
+from django.contrib.auth import get_user_model
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
 from django.db.models import Exists, F, OuterRef, Q
@@ -32,12 +33,17 @@ def _local_administrator(actor):
         raise PermissionDenied('此映射操作仅允许在本地隔离环境执行。')
     if not actor.is_authenticated or not actor.is_active or not actor.is_staff:
         raise PermissionDenied('此映射操作仅限已登录管理员。')
+    # 不能靠调用方持有的旧User对象绕过管理员降权或禁用。
+    current = get_user_model().objects.select_for_update().filter(pk=actor.pk, is_active=True, is_staff=True).first()
+    if current is None:
+        raise PermissionDenied('此映射操作仅限已登录管理员。')
+    return current
 
 
 @transaction.atomic
 def verify_legacy_binding(actor, membership_id, *, evidence_sha256, entitlement_id=None, expected_revision=0):
     """显式确认独立旧服务或合并目标；不创建权益、账期、身份或发布任务。"""
-    _local_administrator(actor)
+    actor = _local_administrator(actor)
     try:
         member = Membership.objects.select_for_update().select_related('user').get(pk=membership_id)
     except Membership.DoesNotExist:

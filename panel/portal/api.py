@@ -16,10 +16,10 @@ from django.views.csrf import csrf_failure as html_csrf_failure
 from django.views.decorators.debug import sensitive_variables
 
 from .api_helpers import (CLIENTS, client_catalog, compatibility_for, iso,
-                          legacy_services, project_service, service_queryset, visible_legacy_services)
+                          project_service, service_queryset, visible_legacy_services)
 from .legacy_binding import verified_legacy_bindings
 from .client_rules import PROTECTED, policy_document, validate_rule
-from .models import ClientDirectRule, Entitlement, Membership
+from .models import ClientDirectRule, Entitlement
 from .services import audit, throttle
 
 
