@@ -24,7 +24,7 @@ ACTIONS = {'client_direct': 'direct', 'proxy': 'proxy'}
 RECEIPT_ACTION = 'local_rule_candidate_receipt'
 ORDER = '启用代理候选优先；其后保护校验，再本机直连候选；同动作按数据库ID'
 LIMITATIONS = ['仅支持本机直连与当前代理；服务器直出和阻断尚未接入。',
-               '导入、排序、基础源覆盖、方案绑定与生产发布尚未接入。',
+               '来源文件可在规则来源分区保存候选版本；尚未参与本处匹配。排序、基础源覆盖、方案绑定与生产发布尚未接入。',
                '当前写入仅在本地 SQLite IMMEDIATE 事务模式开放。']
 MESSAGE = '这是本地数据库候选；保存和命中解释均不代表生产发布或客户端已应用。'
 

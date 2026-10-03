@@ -12,6 +12,8 @@ const adminNavigation = [
   { path: '/admin/users', label: '用户管理', description: '查找账号与分配的服务' },
   { path: '/admin/services', label: '订阅管理', description: '额度、到期与重置时间' },
   { path: '/admin/rules', label: '代理规则', description: '编辑候选与检查匹配' },
+  { path: '/admin/servers', label: '服务器', description: '服务器登记与观测状态' },
+  { path: '/admin/lines', label: '线路', description: '查看入口、协议与出口' },
 ]
 const logoutBusy = ref(false), logoutError = ref('')
 async function logout() {

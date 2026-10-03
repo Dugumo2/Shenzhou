@@ -27,7 +27,7 @@ class AccountNavigationTests(SimpleTestCase):
     @override_settings(MONITOR_URL='https://monitor.example.invalid')
     def test_administrator_navigation_contains_only_connected_workspace_modules(self):
         content = self.render_account(staff=True)
-        for name in ('overview', 'users', 'services', 'rules'):
+        for name in ('overview', 'users', 'services', 'rules', 'servers', 'lines'):
             self.assertIn(f'href="/app/#/admin/{name}"', content)
         self.assertNotIn('href="/manage/', content)
         self.assertNotIn('资源容量', content)

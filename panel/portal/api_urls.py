@@ -4,6 +4,7 @@ from django.urls import path
 from . import api
 from . import admin_api, guide_api
 from . import rule_api, usage_api, candidate_delivery
+from . import inventory_api, rule_source_api
 
 
 app_name = 'api'
@@ -26,4 +27,12 @@ urlpatterns = [
     path('admin/rules', rule_api.rules, name='admin_rules'),
     path('admin/rules/preview', rule_api.preview, name='rule_preview'),
     path('admin/rules/<int:rule_id>', rule_api.rule_detail, name='rule_detail'),
+    path('admin/rule-sources', rule_source_api.sources, name='rule_sources'),
+    path('admin/rule-sources/preview', rule_source_api.preview, name='rule_source_preview'),
+    path('admin/rule-sources/commit', rule_source_api.commit, name='rule_source_commit'),
+    path('admin/rule-sources/<str:source_id>', rule_source_api.source_detail, name='rule_source_detail'),
+    path('admin/servers', inventory_api.servers, name='inventory_servers'),
+    path('admin/servers/<str:public_id>', inventory_api.server_detail, name='inventory_server_detail'),
+    path('admin/lines', inventory_api.lines, name='inventory_lines'),
+    path('admin/lines/<str:public_id>', inventory_api.line_detail, name='inventory_line_detail'),
 ]

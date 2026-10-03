@@ -475,3 +475,53 @@ class LegacyServiceBinding(models.Model):
             models.CheckConstraint(condition=models.Q(state__in=['unverified', 'verified', 'revoked']),
                                    name='legacy_binding_known_state'),
         ]
+
+
+class RuleSource(models.Model):
+    """文件来源的稳定标识；与自建规则、组合方案和发布状态分开。"""
+    public_id = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
+    name = models.CharField(max_length=100)
+    revision = models.PositiveIntegerField(default=1)
+    state = models.CharField(max_length=24, default='candidate_unbound',
+                             choices=[('candidate_unbound', '候选未绑定')])
+    creator = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT,
+                                related_name='created_rule_sources')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-updated_at', 'id']
+        constraints = [
+            models.CheckConstraint(condition=models.Q(revision__gte=1), name='rule_source_positive_revision'),
+            models.CheckConstraint(condition=models.Q(state='candidate_unbound'), name='rule_source_candidate_state'),
+        ]
+
+
+class RuleSourceVersion(models.Model):
+    """仅追加的规范化文件版本；更新来源时保留已保存正文。"""
+    source = models.ForeignKey(RuleSource, on_delete=models.PROTECT, related_name='versions')
+    revision = models.PositiveIntegerField()
+    document = models.JSONField()
+    sha256 = models.CharField(max_length=64)
+    count = models.PositiveIntegerField()
+    creator = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT,
+                                related_name='created_rule_source_versions')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def save(self, *args, **kwargs):
+        from django.core.exceptions import ValidationError
+        if not self._state.adding or (self.pk is not None and type(self).objects.filter(pk=self.pk).exists()):
+            raise ValidationError('已保存来源版本不可改写，请新增版本。')
+        return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        from django.core.exceptions import ValidationError
+        raise ValidationError('来源历史版本不可删除。')
+
+    class Meta:
+        ordering = ['-revision']
+        constraints = [
+            models.UniqueConstraint(fields=['source', 'revision'], name='unique_rule_source_version'),
+            models.CheckConstraint(condition=models.Q(revision__gte=1), name='rule_source_version_positive'),
+            models.CheckConstraint(condition=models.Q(count__lte=500), name='rule_source_version_count_limit'),
+        ]

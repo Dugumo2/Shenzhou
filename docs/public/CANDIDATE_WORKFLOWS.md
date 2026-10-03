@@ -42,6 +42,14 @@
 
 ## 接口
 
+2026-10-04新增本地切片：规则来源文件导入→差异预览→确认保存不可变候选版本；管理员独立服务器/线路登记查询。来源仍未绑定组合，不改变现有自建规则、匹配或客户端产物。
+
+规则来源入口 `/app/#/admin/rules/sources`；支持UTF-8严格JSON `{ "schema_version": 1, "rules": [...] }`，规则字段为action（proxy/client_direct）、kind（exact/suffix/regex）、value、可选scope_domain/enabled。最多256KiB/500条。重复字段、不支持字段、重复匹配、IP和受保护直连域拒绝；跨来源或自建父子域重叠显示差异提示，不替用户猜优先级。
+
+预览无数据库写，凭证绑定管理员、规范化输入和来源/自建规则快照，10分钟内有效。确认使用修订号及幂等键；过期或并发变化需重新预览；未知结果重试原请求。前端pending只存当前应用内存，刷新整页会丢失本地请求信息。每个历史版本独立保存，文件顺序变化可见。摘要/条数与正文不一致明确拒绝。
+
+服务器和线路入口 `/app/#/admin/servers`、`/app/#/admin/lines` 分开，支持搜索、分页及详情；服务器可跳转关联线路。没有可信采样时，在线、CPU、内存、实际核心版本保持未知，最后记录不当在线证据。此处只读登记，不读取受限配置引用，不显示全局倍率，不提供假探测或假拓扑编辑按钮。真实监控、核心实例和完整上下游管理仍未实现。
+
 统一前缀 `/api/v1`，写操作使用同源会话和 CSRF。
 
 | 方法与路径 | 行为 |
@@ -49,13 +57,19 @@
 | GET/POST `/admin/rules` | 候选列表或创建 |
 | PATCH/DELETE `/admin/rules/{id}` | 带修订和幂等键更新或确认删除 |
 | POST `/admin/rules/preview` | 域名候选命中解释 |
+| GET `/admin/rule-sources` | 来源搜索与分页 |
+| GET `/admin/rule-sources/{uuid}?version=1` | 来源当前或历史版本条目 |
+| POST `/admin/rule-sources/preview` | name/source_id/expected_revision/document生成差异；document可为原始JSON文本 |
+| POST `/admin/rule-sources/commit` | 原输入加preview_token/idempotency_key，确认保存未绑定候选 |
+| GET `/admin/servers`、`/admin/servers/{uuid}` | 管理员服务器登记列表和详情 |
+| GET `/admin/lines`、`/admin/lines/{uuid}` | 管理员线路关系；可按server_id关联筛选 |
 | GET `/me/services/{id}/usage?period=current` | 本人用量概览与入账记录 |
 | GET/POST `/me/services/{id}/delivery` | 读取或获取合成演示资源 |
 | GET/HEAD `/me/services/{id}/delivery/{client}/resources/{key}` | 本人下载固定资源键 |
 
 ## 验证与限制
 
-本轮公开后端509项测试通过（Windows跳过1项POSIX特有检查），前端41项测试与类型检查、构建通过。另14项依赖未公开现场脚本的测试保持未测。
+2026-10-04集成结果：578项公开后端测试通过（Windows跳过1项POSIX特有检查），63项前端测试、类型检查及构建通过。另14项依赖未公开现场脚本的测试保持未测。
 
 本机浏览器验证了规则规范化、覆盖拒绝、启停、编辑、删除、子域匹配，用量时段切换和过期统计未知余额，Windows资源实际下载及稳定地址、复制，SFA软件切换获取。浏览器测试使用既有隔离假账号和测试资产。
 
