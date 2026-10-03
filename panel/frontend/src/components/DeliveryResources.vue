@@ -3,11 +3,13 @@ import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { request, errorMessage, ApiError } from '../api'
 import { boundedRequest } from '../billingPending'
 import type { CandidateDelivery } from '../delivery-types'
+import { connectionSteps } from '../connectionSteps'
 
 const props = defineProps<{ serviceId: string; clientId: string }>()
 const delivery = ref<CandidateDelivery | null>(null)
 const loading = ref(false), obtaining = ref(false), error = ref(''), copied = ref('')
 const revisionReady = ref(false)
+const activeStep = ref(0)
 let generation = 0
 let contextKey = ''
 let disposed = false
@@ -19,6 +21,8 @@ const resources = computed(() => (delivery.value?.resources || []).filter(item =
   return item.download_url.startsWith(prefix) && /^[a-z][a-z0-9-]{0,63}$/.test(item.download_url.slice(prefix.length))
 }))
 const supported = computed(() => ['windows', 'v2rayng', 'android'].includes(props.clientId))
+const steps = computed(() => connectionSteps(props.clientId, resources.value))
+const currentStep = computed(() => steps.value[activeStep.value])
 const canObtain = computed(() => supported.value && revisionReady.value && !!delivery.value
   && delivery.value.state !== 'blocked' && !obtaining.value && !loading.value)
 
@@ -29,6 +33,7 @@ async function load() {
   const key = JSON.stringify([props.serviceId, props.clientId])
   if (key !== contextKey) {
     contextKey = key
+    activeStep.value = 0
     delivery.value = null; pending.value = null; obtaining.value = false
   } else if (obtaining.value) return
   const current = ++generation
@@ -76,37 +81,39 @@ watch(() => [props.serviceId, props.clientId], load, { immediate: true, flush: '
 </script>
 
 <template>
-  <section aria-label="交付资源" class="delivery-resources">
-    <el-alert title="本机合成演示资源" description="仅验证获取、复制和实际下载。演示节点不可连接；地址需要本人登录，不能用于客户端无人值守自动更新。" type="warning" :closable="false" show-icon />
+  <section aria-label="软件连接步骤" class="delivery-resources">
+    <el-alert title="当前为演示，真实订阅尚未接入" description="可预览和下载示例文件，但不能连接代理；演示地址需要登录，不能用于客户端自动更新。" type="warning" :closable="false" show-icon />
     <p v-if="!supported" class="muted">这个软件尚未提供资源编译，不提供下载地址。</p>
     <el-skeleton v-else-if="loading && !delivery" :rows="2" animated />
     <template v-else>
       <el-alert v-if="error" :title="error" type="error" :closable="false" show-icon class="spaced" />
       <template v-if="delivery">
-        <p class="small muted">{{ delivery.message }}</p>
+        <p v-if="delivery.state === 'blocked'" class="quality-note">{{ delivery.message }}</p>
         <el-alert v-if="delivery.update_error" :title="delivery.update_error" type="warning" :closable="false" show-icon class="spaced" />
-        <p v-if="delivery.updates_available" class="small">候选规则已变化。重新获取会生成新内容并保持原下载地址。</p>
-        <el-button v-if="delivery.state !== 'blocked'" type="primary" :loading="obtaining" :disabled="!canObtain" @click="obtain">{{ pending && !obtaining ? '重试确认获取结果' : delivery.state === 'ready' ? '重新获取演示资源' : '获取演示资源' }}</el-button>
+        <p v-if="delivery.updates_available" class="small">规则已更新，可重新生成演示文件。</p>
+        <el-button v-if="delivery.state !== 'blocked' && (delivery.state !== 'ready' || pending || delivery.updates_available)" type="primary" :loading="obtaining" :disabled="!canObtain" @click="obtain">{{ pending && !obtaining ? '重试确认获取结果' : delivery.state === 'ready' ? '更新演示文件' : '准备演示文件' }}</el-button>
         <p v-if="pending && !obtaining" class="small muted">上次获取结果尚未确认，重试会沿用同一操作标识；此前资源保留。</p>
-        <p v-if="resources.length" class="small muted">这些资源来自同一份候选自建规则；软件切换沿用这份服务，不增加额度或接入身份。</p>
-        <ul v-if="resources.length" class="resource-list">
-          <li v-for="resource in resources" :key="resource.key">
-            <div><strong>{{ resource.label }}</strong><span class="small muted">{{ resource.filename }} · {{ resource.bytes }} 字节</span></div>
-            <div class="resource-actions"><el-button tag="a" :href="resource.download_url" download>下载</el-button><el-button @click="copyAddress(resource.download_url, resource.key)">{{ copied === resource.key ? '地址已复制' : '复制地址' }}</el-button></div>
-          </li>
-        </ul>
-        <p class="small muted">{{ delivery.unsupported_resources.join('、') }}尚未编译。真实订阅令牌、旧地址兼容和客户端应用仍待验证。</p>
+        <template v-if="delivery.state === 'ready'">
+          <nav class="connection-steps" aria-label="连接步骤"><button v-for="(step, index) in steps" :key="step.title" type="button" :class="{active: activeStep === index}" :aria-current="activeStep === index ? 'step' : undefined" @click="activeStep = index">{{ index + 1 }}. {{ step.title }}</button></nav>
+          <article v-if="currentStep" class="connection-step"><h3>{{ currentStep.title }}</h3><p class="muted">{{ currentStep.description }}</p>
+            <div v-if="currentStep.resource" class="resource-actions"><el-button type="primary" tag="a" :href="currentStep.resource.download_url" download>{{ currentStep.downloadLabel }}</el-button><el-button @click="copyAddress(currentStep.resource.download_url, currentStep.resource.key)">{{ copied === currentStep.resource.key ? '地址已复制' : '复制演示下载地址' }}</el-button></div>
+            <p v-else-if="activeStep < steps.length - 1" class="quality-note">这一步所需的文件尚未准备好，请刷新状态后重试。</p>
+          </article>
+          <div class="step-navigation"><el-button v-if="activeStep > 0" @click="activeStep--">上一步</el-button><el-button v-if="activeStep < steps.length - 1" @click="activeStep++">查看下一步</el-button></div>
+        </template>
       </template>
     </template>
-    <el-button v-if="supported" :loading="loading" :disabled="loading || obtaining" @click="load">重新读取交付状态</el-button>
+    <el-button v-if="supported" text :loading="loading" :disabled="loading || obtaining" @click="load">刷新状态</el-button>
   </section>
 </template>
 
 <style scoped>
 .delivery-resources { margin: 16px 0; }
-.resource-list { padding: 0; list-style: none; }
-.resource-list li { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--el-border-color-light); }
-.resource-list li span { display: block; margin-top: 4px; }
+.connection-steps { display: flex; gap: 10px; flex-wrap: wrap; margin: 24px 0; }
+.connection-steps button { font: inherit; font-size: 14px; cursor: pointer; background: transparent; border: 1px solid var(--border, #dfe6ed); border-radius: 8px; padding: 10px 16px; color: var(--muted, #687887); }
+.connection-steps button.active { color: var(--el-color-primary); border-color: var(--el-color-primary); background: #eef3ff; }
+.connection-step { padding: 4px 0 18px; }
+.step-navigation { margin: 8px 0 18px; }
 .resource-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .resource-actions .el-button + .el-button { margin-left: 0; }
 </style>

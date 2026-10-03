@@ -7,6 +7,7 @@ import ts from 'typescript'
 import * as vue from 'vue'
 import * as api from '../src/api.ts'
 import { boundedRequest } from '../src/billingPending.ts'
+import * as connection from '../src/connectionSteps.ts'
 import type { CandidateDelivery } from '../src/delivery-types.ts'
 
 function data(serviceId = 'service-a', clientId = 'windows', revision = 1, ready = true): CandidateDelivery {
@@ -49,6 +50,7 @@ function mount(send: (path: string, method?: string, value?: unknown) => Promise
     ? { ...vue, onBeforeUnmount: (fn: () => void) => hooks.push(fn), resolveComponent: (name: string) => name }
     : name === '../api' ? { ...api, request: send }
       : name === '../billingPending' ? { boundedRequest: <T>(operation: Promise<T>) => boundedRequest(operation, timeoutMs) }
+        : name === '../connectionSteps' ? connection
         : require(name)
   new Function('require', 'exports', js)(moduleRequire, exports)
   new Function('require', 'exports', renderJs)(moduleRequire, templateExports)
@@ -290,4 +292,31 @@ test('真实组件只展示当前服务软件的精确相对资源URL', async ()
   await flush()
   assert.deepEqual(ui.state.resources.value, [original])
   ui.unmount()
+})
+
+function visibleLinks(node: any): string[] {
+  if (!node || typeof node !== 'object') return []
+  const own = typeof node.props?.href === 'string' ? [node.props.href] : []
+  const children = Array.isArray(node.children) ? node.children : node.children?.default?.() || []
+  return [...own, ...children.flatMap(visibleLinks)]
+}
+
+test('真实向导仅暴露软件必要资源；SFA不再列内部规则文件，桌面节点和路由分步展示', async () => {
+  for (const clientId of ['android', 'windows', 'v2rayng']) {
+    const value = data('service-a', clientId)
+    for (const key of ['policy', 'rules-direct', 'rules-proxy', 'routing']) {
+      value.resources.push({ ...value.resources[0], key,
+        download_url: value.resources[0].download_url.replace('/subscription', '/' + key) })
+    }
+    const ui = mount(async () => value, { clientId }); await flush()
+    assert.equal(ui.state.activeStep.value, 0)
+    assert.deepEqual(visibleLinks(ui.render()), [value.resources[0].download_url])
+    ui.state.activeStep.value = 1; await flush()
+    assert.deepEqual(visibleLinks(ui.render()), clientId === 'android' ? [] : [value.resources.at(-1)!.download_url])
+    for (let i = 0; i < ui.state.steps.value.length; i++) {
+      ui.state.activeStep.value = i; await flush()
+      assert.ok(visibleLinks(ui.render()).every(url => !/\/(policy|rules-direct|rules-proxy)$/.test(url)))
+    }
+    ui.unmount()
+  }
 })
