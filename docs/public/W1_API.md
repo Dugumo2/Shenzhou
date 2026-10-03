@@ -10,6 +10,9 @@
 | POST `/login`、`/logout` | 真实登录与退出，会话与CSRF校验 |
 | GET `/me/services`、`/me/services/{id}` | 本人服务及只读明细；无服务账号不自动开通 |
 | GET `/catalog/clients`、`/catalog/clients/{id}/guide` | 登录后的客户端目录与指南核验状态 |
+| GET `/catalog/guides?q=&client=` | 登录后任务指南；按标题、步骤正文、关键词搜索并筛选软件 |
+| GET `/admin/overview` | 数据库账号、服务与已记录缺口概览；不冒充实时监控 |
+| GET `/admin/users`、`/admin/users/{id}` | 管理员用户搜索、状态筛选、分页及本人归属服务明细；仅查询 |
 | GET `/admin/services` | 管理员搜索、状态筛选及分页；每份服务一行 |
 | GET `/admin/rules` | 数据库规则候选及来源索引，不冒充生产已发布版本 |
 | GET `/admin/services/{id}/billing` | 已保存活动账期和独立重置计划；纯读取，不建账期 |

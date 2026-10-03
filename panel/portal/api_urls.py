@@ -2,10 +2,15 @@
 from django.urls import path
 
 from . import api
+from . import admin_api, guide_api
 
 
 app_name = 'api'
 urlpatterns = [
+    path('catalog/guides', guide_api.guides, name='guides'),
+    path('admin/overview', admin_api.overview, name='admin_overview'),
+    path('admin/users', admin_api.users, name='admin_users'),
+    path('admin/users/<str:user_id>', admin_api.user_detail, name='admin_user_detail'),
     path('session', api.session, name='session'),
     path('login', api.login, name='login'),
     path('logout', api.logout, name='logout'),

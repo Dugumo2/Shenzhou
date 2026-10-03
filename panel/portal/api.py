@@ -166,19 +166,11 @@ def clients(request):
 
 @endpoint()
 def client_guide(request, client_id):
-    client = next((value for value in CLIENTS if value['id'] == client_id), None)
-    if client is None:
+    from .guide_content import client_guide_payload
+    payload = client_guide_payload(client_id)
+    if payload is None:
         return error('not_found', '软件指南不存在。', 404)
-    return success({'client_id': client_id, 'title': client['name'] + ' 使用指南',
-                    'verification': 'unsupported' if client_id == 'router' else 'not_tested',
-                    'software_version': None, 'core_version': None,
-                    'steps': [] if client_id == 'router' else [
-                        {'title': '确认服务与软件版本', 'body': '先进入本人服务，确认管理员已开通，并核对所装软件及核心版本。'},
-                        {'title': '取得匹配资源', 'body': '在服务详情选择此软件；资源未准备好时等待管理员处理，不使用示例链接。'},
-                        {'title': '导入、更新与验证', 'body': '实际菜单与更新步骤须按核验后的版本补齐；下载后仍需在客户端应用并验证。'}],
-                    'update_status': {'published': 'unknown', 'downloaded': 'unknown', 'applied': 'unknown'},
-                    'limitations': ['此入口未完成实际软件版本、菜单、导入和更新核验。',
-                                    '发布、下载和客户端应用是三个独立状态；下载成功不代表已生效。']})
+    return success(payload)
 
 
 def page_options(request):

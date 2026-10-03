@@ -9,6 +9,10 @@ export const router = createRouter({
     { path: '/services/:id', component: () => import('./pages/ServicePage.vue') },
     { path: '/guides', component: () => import('./pages/GuidesPage.vue') },
     { path: '/account', component: () => import('./pages/AccountPage.vue') },
+    { path: '/admin', redirect: '/admin/overview', meta: { admin: true } },
+    { path: '/admin/overview', component: () => import('./pages/AdminOverviewPage.vue'), meta: { admin: true } },
+    { path: '/admin/users', component: () => import('./pages/AdminUsersPage.vue'), meta: { admin: true } },
+    { path: '/admin/users/:id', component: () => import('./pages/AdminUserPage.vue'), meta: { admin: true } },
     { path: '/admin/services', component: () => import('./pages/AdminServicesPage.vue'), meta: { admin: true } },
     { path: '/admin/rules', component: () => import('./pages/RulesPage.vue'), meta: { admin: true } },
     { path: '/:pathMatch(.*)*', redirect: '/services' },
@@ -19,6 +23,6 @@ router.beforeEach(async to => {
     if (!to.meta.public) return { path: '/login', query: { redirect: to.fullPath } }
   }
   if (!to.meta.public && !auth.session?.authenticated) return { path: '/login', query: { redirect: to.fullPath } }
-  if (to.meta.admin && !auth.session?.user?.is_staff) return '/services'
+  if ((to.meta.admin || to.path === '/admin' || to.path.startsWith('/admin/')) && !auth.session?.user?.is_staff) return '/services'
   if (to.name === 'login' && auth.session?.authenticated) return '/services'
 })

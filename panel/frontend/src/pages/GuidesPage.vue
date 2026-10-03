@@ -1,33 +1,43 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onUnmounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { request, errorMessage } from '../api'
-import type { Client, Guide } from '../types'
+import type { GuideCatalog } from '../guide-types'
 const route = useRoute()
-const clients = ref<Client[]>([]), guide = ref<Guide | null>(null)
-const busy = ref(true), guideBusy = ref(false), error = ref(''), guideError = ref(''), search = ref(''), selected = ref('')
-const filtered = computed(() => clients.value.filter(c => (c.name + ' ' + c.os + ' ' + c.reason).toLocaleLowerCase().includes(search.value.toLocaleLowerCase())))
+const catalog = ref<GuideCatalog | null>(null), search = ref(''), client = ref('all'), selected = ref('')
+const busy = ref(false), error = ref('')
+const article = computed(() => catalog.value?.articles.find(item => item.id === selected.value))
 let generation = 0
-async function open(id: string) {
-  const current = ++generation
-  selected.value = id; guide.value = null; guideError.value = ''; guideBusy.value = true
-  try { const data = await request<Guide>('/catalog/clients/' + encodeURIComponent(id) + '/guide'); if (current === generation) guide.value = data }
-  catch (e) { if (current === generation) guideError.value = errorMessage(e) }
-  finally { if (current === generation) guideBusy.value = false }
-}
 async function load() {
+  const current = ++generation
   busy.value = true; error.value = ''
-  try { clients.value = (await request<{ items: Client[] }>('/catalog/clients')).items; if (typeof route.query.client === 'string' && clients.value.some(c => c.id === route.query.client)) await open(route.query.client) }
-  catch (e) { error.value = errorMessage(e) }
-  finally { busy.value = false }
+  try {
+    const data = await request<GuideCatalog>('/catalog/guides?' + new URLSearchParams({ q: search.value, client: client.value }))
+    if (current !== generation) return
+    catalog.value = data
+    if (!data.articles.some(item => item.id === selected.value)) selected.value = data.articles[0]?.id || ''
+  } catch (e) { if (current === generation) error.value = errorMessage(e) }
+  finally { if (current === generation) busy.value = false }
 }
-onMounted(load)
-watch(() => route.query.client, id => { if (typeof id === 'string' && clients.value.some(c => c.id === id)) void open(id) })
+watch(() => route.query.client, value => {
+  client.value = typeof value === 'string' ? value : 'all'
+  selected.value = ({ windows: 'windows-v2rayn', v2rayng: 'android-v2rayng', android: 'android-sfa', router: 'router-readiness' } as Record<string,string>)[client.value] || ''
+  void load()
+}, { immediate: true })
+onUnmounted(() => { generation++ })
 </script>
 <template>
-  <div class="page-title"><div><p class="eyebrow">按软件查找</p><h1>使用指南</h1><p class="muted">了解首次导入、更新和应用的步骤。</p></div><el-button :loading="busy" @click="load">刷新</el-button></div>
+  <div class="page-title"><div><p class="eyebrow">帮助中心</p><h1>你想完成哪一步？</h1><p class="muted">按软件选择，或搜索导入、更新规则、流量等问题。</p></div><el-button :loading="busy" @click="load">刷新</el-button></div>
+  <form class="table-filters" @submit.prevent="load"><label class="visually-hidden" for="guide-search">搜索指南全文</label><el-input id="guide-search" v-model="search" placeholder="搜索标题、步骤或问题" clearable /><el-select v-model="client" aria-label="筛选软件" @change="load"><el-option value="all" label="全部软件" /><el-option v-for="item in catalog?.client_filters || []" :key="item.id" :value="item.id" :label="item.label" /></el-select><el-button type="primary" native-type="submit" :loading="busy">搜索</el-button></form>
   <el-alert v-if="error" :title="error" type="error" show-icon :closable="false" class="spaced" />
-  <div class="guide-layout"><aside class="surface guide-list"><label class="visually-hidden" for="guide-search">搜索软件或系统</label><el-input id="guide-search" v-model="search" clearable placeholder="搜索软件或系统" /><el-skeleton v-if="busy" :rows="4" animated /><button v-for="client in filtered" :key="client.id" :class="{ selected: selected === client.id }" @click="open(client.id)"><strong>{{ client.name }}</strong><span>{{ client.os || '路由器' }} · {{ client.verification === 'verified' ? '已验证' : client.verification === 'unsupported' ? '暂不支持' : '待实机验证' }}</span></button><p v-if="!busy && !filtered.length" class="muted">没有匹配的指南。</p></aside>
-    <section class="surface guide-content"><el-alert v-if="guideError" :title="guideError" type="error" :closable="false" show-icon /><el-skeleton v-if="guideBusy" :rows="6" animated /><template v-else-if="guide"><p class="eyebrow">软件指南</p><h2>{{ guide.title }}</h2><el-alert v-if="guide.verification !== 'verified'" title="这份指南尚未通过当前版本实机验证。" type="warning" :closable="false" show-icon /><p class="small muted">软件版本：{{ guide.software_version || '待核对' }} · 内置核心版本：{{ guide.core_version || '待核对' }}</p><ol class="guide-steps"><li v-for="step in guide.steps" :key="step.title"><h3>{{ step.title }}</h3><p>{{ step.body }}</p></li></ol><div class="inline-note"><h3>使用前请留意</h3><ul><li v-for="limit in guide.limitations" :key="limit">{{ limit }}</li></ul></div><div class="release-facts"><span>资源发布：{{ guide.update_status.published === 'unknown' ? '待确认' : guide.update_status.published }}</span><span>客户端下载：{{ guide.update_status.downloaded === 'unknown' ? '待确认' : guide.update_status.downloaded }}</span><span>客户端应用：{{ guide.update_status.applied === 'unknown' ? '待确认' : guide.update_status.applied }}</span></div></template><div v-else-if="!guideError && !guideBusy" class="empty-state"><h2>选择一份指南</h2><p>从左侧选择你正在使用的软件。</p></div></section>
+  <el-skeleton v-if="busy && !catalog" :rows="7" animated />
+  <div v-if="catalog" class="guide-layout">
+    <aside class="surface guide-list" aria-label="指南目录"><p class="small muted">{{ catalog.total }} 篇指南</p><button v-for="item in catalog.articles" :key="item.id" :class="{selected:selected === item.id}" :aria-pressed="selected === item.id" @click="selected = item.id"><strong>{{ item.title }}</strong><span>{{ item.category }} · {{ item.summary }}</span></button><p v-if="!catalog.total">没有匹配的指南，请换一个关键词。</p></aside>
+    <article v-if="article" class="surface guide-content"><p class="eyebrow">{{ article.category }}</p><h2>{{ article.title }}</h2><p class="muted">{{ article.summary }}</p><el-alert v-if="article.verification.state !== 'not_applicable'" :title="article.verification.note" :type="article.verification.state === 'unsupported' ? 'info' : 'warning'" :closable="false" show-icon />
+      <p v-for="(version,index) in article.versions.historical" :key="index" class="small muted">历史参考：{{ version.software || version.core }}（{{ version.date }}）。{{ version.note }}</p>
+      <section v-for="section in article.sections" :key="section.title" class="account-section"><h3>{{ section.title }}</h3><p v-for="paragraph in section.paragraphs" :key="paragraph">{{ paragraph }}</p><ol v-if="section.steps.length" class="guide-steps"><li v-for="step in section.steps" :key="step">{{ step }}</li></ol><p v-for="note in section.notes" :key="note" class="inline-note">{{ note }}</p></section>
+      <p class="small muted">内容修订：{{ catalog.content_revision }}。软件操作参考不等于你的设备已完成验证。</p>
+    </article>
+    <section v-else class="surface empty-state"><h2>没有匹配的内容</h2><p>试试“更新规则”“订阅”或“流量”。</p></section>
   </div>
 </template>
