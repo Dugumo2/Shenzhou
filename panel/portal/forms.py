@@ -153,10 +153,12 @@ class ClientDirectRuleForm(forms.ModelForm):
                         continue
                     candidate = cleaned['value']
                     existing = other.value
-                    covered = (candidate == existing or
-                               candidate.endswith('.' + existing) or
-                               existing.endswith('.' + candidate))
-                    if covered and (cleaned['kind'] == 'suffix' or other.kind == 'suffix'):
+                    # 只有后缀才能覆盖其子域；精确父域与子域后缀不相交。
+                    existing_covers = other.kind == 'suffix' and (
+                        candidate == existing or candidate.endswith('.' + existing))
+                    candidate_covers = cleaned['kind'] == 'suffix' and (
+                        existing == candidate or existing.endswith('.' + candidate))
+                    if existing_covers or candidate_covers:
                         self.add_error('value', '同一走向已有父域或子域规则覆盖它；请编辑现有规则，避免重复。')
                         break
         return cleaned
