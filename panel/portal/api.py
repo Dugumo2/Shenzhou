@@ -8,7 +8,7 @@ from django.conf import settings
 from django.contrib.auth import authenticate, get_user_model, login as auth_login, logout as auth_logout
 from django.core.exceptions import ValidationError
 from django.core.paginator import EmptyPage, Paginator
-from django.db.models import CharField, F, Q, Value
+from django.db.models import CharField, Exists, F, OuterRef, Q, Value
 from django.http import JsonResponse
 from django.middleware.csrf import get_token
 from django.utils import timezone
@@ -16,10 +16,10 @@ from django.views.csrf import csrf_failure as html_csrf_failure
 from django.views.decorators.debug import sensitive_variables
 
 from .api_helpers import (CLIENTS, client_catalog, compatibility_for, iso,
-                          project_service, service_queryset, visible_legacy_services)
+                          matching_service_ids, project_service, service_queryset, visible_legacy_services)
 from .legacy_binding import verified_legacy_bindings
 from .client_rules import PROTECTED, policy_document, validate_rule
-from .models import ClientDirectRule, Entitlement
+from .models import BillingCycle, ClientDirectRule, Entitlement
 from .services import audit, throttle
 
 
@@ -204,8 +204,23 @@ def admin_services(request):
         entitlements, memberships = entitlements.filter(search | Q(pk__in=old_targets)), memberships.filter(search)
     if state == 'expired':
         entitlements, memberships = entitlements.filter(expires_at__lte=now), memberships.filter(expires_at__lte=now)
+    elif state == 'active':
+        # “已应用”不能包含停用、到期、旧修订或尚无可靠当前期统计的服务。
+        # 先在数据库缩小候选，再复用读投影的计量质量判断；应用成功不是核心能力验收。
+        exhausted_cycle = BillingCycle.objects.filter(
+            entitlement_id=OuterRef('pk'), starts_at__lte=now, ends_at__gt=now,
+            used_bytes__gte=OuterRef('applied_snapshot__quota_bytes'))
+        candidates = entitlements.filter(
+            state='active', enabled=True, user__is_active=True, expires_at__gt=now,
+            applied_revision=F('revision'), applied_revision__gt=0,
+        ).annotate(known_exhausted=Exists(exhausted_cycle)).filter(known_exhausted=False)
+        entitlements = entitlements.filter(pk__in=matching_service_ids(candidates, 'entitlement', 'active', now))
+        # 旧共享身份计量未核验，不能借另一份权益的统计证明有效。
+        memberships = memberships.none()
     elif state == 'metering_gap':
-        entitlements, memberships = entitlements.filter(metering_gap=True), memberships.none()
+        entitlements = entitlements.filter(
+            pk__in=matching_service_ids(entitlements, 'entitlement', 'metering_gap', now))
+        memberships = memberships.none()
     elif state == 'disabled':
         entitlements = entitlements.filter(Q(enabled=False) | Q(state='disabled'))
         memberships = memberships.none()

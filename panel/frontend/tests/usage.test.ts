@@ -62,7 +62,7 @@ function mount(send: (path: string) => Promise<UsageOverviewData>) {
   const props = vue.reactive({ serviceId: 'service-a', refreshKey: 0 })
   const exports: Record<string, any> = {}
   const moduleRequire = (name: string) => name === 'vue' ? { ...vue, onBeforeUnmount: (fn: () => void) => hooks.push(fn) }
-    : name === '../api' ? { ...api, request: send } : name === '../display' ? display : name === '../usage-types' ? usage : require(name)
+    : name === '../api' ? { ...api, request: send } : name === '../display' ? display : name === '../usage-types' ? usage : name === './UsageDashboard.vue' ? {} : require(name)
   new Function('require', 'exports', js)(moduleRequire, exports)
   const state = scope.run(() => exports.default.setup(props, { expose: () => {} }))
   return { state, props, unmount() { hooks.forEach(fn => fn()); scope.stop() } }

@@ -12,6 +12,7 @@ export interface Service {
   id: string; name: string; quota_bytes: Bytes; used_bytes: Bytes; raw_bytes: Bytes
   remaining_bytes: Bytes; next_reset_at: string | null; expires_at: string | null
   state: string; enabled: boolean; status_label: string; source_type: 'entitlement' | 'membership'
+  business_state?: string; quota_state?: 'applied' | 'configured'
   usage: { quality: string; updated_at: string | null; message: string }
   delivery: Delivery
   user?: { username: string }

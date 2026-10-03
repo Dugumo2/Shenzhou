@@ -46,7 +46,8 @@ watch(() => route.params.id, () => { service.value = null; device.value = ''; ac
   <template v-if="service">
     <el-tabs v-model="activeSection" class="service-sections" aria-label="服务功能分区">
     <el-tab-pane label="服务概览" name="overview">
-    <section class="surface detail-summary"><ServiceMetrics :service="service" /><p v-if="service.usage.quality !== 'measured'" class="quality-note">{{ service.usage.message || '用量暂不可确认，剩余额度待核算。' }}</p></section>
+    <UsageOverview :key="service.id + '-overview'" :service-id="service.id" :refresh-key="refreshKey" summary-only />
+    <section class="surface detail-summary"><ServiceMetrics :service="service" lifecycle-only /></section>
     <div class="service-actions"><button class="surface" @click="activeSection = 'connect'"><strong>连接设置 →</strong><span>选择设备和软件，按步骤导入订阅。</span></button><button class="surface" @click="activeSection = 'usage'"><strong>查看流量用量 →</strong><span>查看本期使用情况和统计详情。</span></button></div>
     </el-tab-pane>
     <el-tab-pane label="流量用量" name="usage" lazy>

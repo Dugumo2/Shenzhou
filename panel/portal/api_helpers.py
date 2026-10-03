@@ -63,8 +63,8 @@ def service_queryset():
     return Entitlement.objects.select_related('user')
 
 
-def project_service(record, source_type, *, now=None, detail=False, administrator=False):
-    now = now or timezone.now()
+def service_facts(record, source_type, now):
+    """只从现有记录核对状态依据；业务筛选与页面投影复用同一份事实。"""
     gap = False
     cycle = None
     if source_type == 'entitlement':
@@ -82,7 +82,8 @@ def project_service(record, source_type, *, now=None, detail=False, administrato
         quota = applied_quota if byte_string(applied_quota) is not None else record.quota_bytes
         quota_state = 'applied' if byte_string(applied_quota) is not None else 'configured'
         state, enabled = record.state, record.enabled
-        is_applied = record.state == 'active' and record.applied_revision == record.revision
+        is_applied = (record.state == 'active' and record.applied_revision > 0
+                      and record.applied_revision == record.revision)
         application = {'state': 'isolated' if state == 'simulated' else 'applied' if is_applied else
                        'failed' if state == 'failed' else 'blocked' if state == 'blocked' else 'waiting',
                        'desired_revision': record.revision, 'applied_revision': record.applied_revision}
@@ -98,24 +99,68 @@ def project_service(record, source_type, *, now=None, detail=False, administrato
     expires = record.expires_at
     remaining = (max(0, quota - used) if quality == 'measured' and quota_state == 'applied'
                  and used is not None and byte_string(quota) is not None else None)
+    return {'quota': quota, 'used': used, 'raw': raw, 'observed': observed, 'quality': quality,
+            'quota_state': quota_state, 'state': state, 'enabled': enabled, 'is_applied': is_applied,
+            'application': application, 'next_reset': next_reset, 'expires': expires,
+            'remaining': remaining}
+
+
+def service_business_status(record, source_type, facts, now):
+    """业务主状态不能仅由应用回执决定；未知用量不证明耗尽或有效。"""
+    state, expires = facts['state'], facts['expires']
     if not record.user.is_active:
-        message = '账号已停用，请联系管理员。'
-    elif not enabled or state in ('disabled', 'suspended', 'disabling', 'suspension_pending', 'enforcement_pending'):
-        message = '服务已暂停或正在停用，请联系管理员。'
-    elif expires and expires <= now:
-        message = '服务已到期，请联系管理员续期。'
-    elif gap:
-        message = '计量存在缺口，请等待管理员核对。'
-    elif source_type == 'membership':
-        message = '此服务的资源尚未迁入当前交付入口，请联系管理员核对。'
-    elif state == 'simulated':
-        message = '当前仅完成隔离验证，尚未提供可用交付。'
-    elif not is_applied or expires is None:
-        message = '服务尚未完成应用，请等待管理员开通。'
-    elif remaining == 0:
-        message = '本期额度已用完，请等待下次重置与恢复核验。'
-    else:
-        message = None
+        return 'account_disabled', '账号已停用', '账号已停用，请联系管理员。'
+    if state in ('disabled', 'suspended', 'disabling', 'suspension_pending', 'enforcement_pending'):
+        return state, STATE_LABELS[state], '服务已暂停或正在停用，请联系管理员。'
+    if not facts['enabled']:
+        return 'disabled', '已停用', '服务已停用，请联系管理员。'
+    if expires and expires <= now:
+        return 'expired', '已到期', '服务已到期，请联系管理员续期。'
+    if facts['remaining'] == 0:
+        return 'exhausted', '本期额度已用完', '本期额度已用完，请等待下次重置与恢复核验。'
+    if facts['quality'] == 'gap':
+        return 'metering_gap', '用量待核算', '计量或账期存在缺口，请等待管理员核对。'
+    if source_type == 'membership':
+        return ('verification_required', '待核验',
+                '此服务的资源尚未迁入当前交付入口，请联系管理员核对。')
+    if state == 'simulated':
+        return 'simulated', STATE_LABELS[state], '当前仅完成隔离验证，尚未提供可用交付。'
+    if not facts['is_applied']:
+        business_state = state if state in STATE_LABELS and state != 'active' else 'pending'
+        label = '等待应用' if state == 'active' else STATE_LABELS.get(state, '等待应用')
+        return business_state, label, '服务尚未完成应用，请等待管理员核对。'
+    if expires is None:
+        return 'verification_required', '有效期待核验', '服务有效期尚未确认，请联系管理员核对。'
+    if facts['quota_state'] != 'applied':
+        return 'verification_required', '额度待核验', '服务额度尚未完成应用核验，请联系管理员。'
+    if facts['quality'] != 'measured':
+        return ('metering_' + facts['quality'], '用量待核算',
+                '统计已过期或尚无可靠计量证据，请等待管理员核对。')
+    # 这里只确认登记状态和已持久样本，不能作为核心限额、撤销或真实交付验收。
+    return 'active', STATE_LABELS['active'], None
+
+
+def matching_service_ids(query, source_type, requested_state, now):
+    """分块核对派生状态，只保留索引主键；不物化所有用户或全部账本。"""
+    matches = []
+    for record in query.select_related('user').iterator(chunk_size=100):
+        facts = service_facts(record, source_type, now)
+        if requested_state == 'metering_gap':
+            # 缺口筛选是计量维度，已到期服务也可能同时存在缺口。
+            match = facts['quality'] == 'gap'
+        else:
+            match = service_business_status(record, source_type, facts, now)[0] == requested_state
+        if match:
+            matches.append(record.pk)
+    return matches
+
+
+def project_service(record, source_type, *, now=None, detail=False, administrator=False):
+    now = now or timezone.now()
+    facts = service_facts(record, source_type, now)
+    business_state, status_label, message = service_business_status(record, source_type, facts, now)
+    quota, used, raw = facts['quota'], facts['used'], facts['raw']
+    remaining, quality = facts['remaining'], facts['quality']
     blocked = message is not None
     has_resources = (record.subscriptions.exists() if source_type == 'entitlement' else record.grants.exists())
     delivery = {'state': 'blocked' if blocked else 'verification_required' if has_resources else 'not_prepared',
@@ -126,12 +171,13 @@ def project_service(record, source_type, *, now=None, detail=False, administrato
                       'gap': '计量或账期存在缺口，当前用量和剩余待核算。',
                       'unknown': '暂无可靠统计，当前用量和剩余待核算。'}
     result = {'id': str(record.public_id), 'source_type': source_type, 'name': '神舟云',
-              'quota_bytes': byte_string(quota), 'quota_state': quota_state,
+              'quota_bytes': byte_string(quota), 'quota_state': facts['quota_state'],
               'used_bytes': byte_string(used), 'raw_bytes': byte_string(raw), 'remaining_bytes': byte_string(remaining),
-              'next_reset_at': iso(next_reset), 'expires_at': iso(expires), 'state': state, 'enabled': enabled,
-              'status_label': '已到期' if expires and expires <= now else STATE_LABELS.get(state, '待核验'),
-              'usage': {'quality': quality, 'updated_at': iso(observed), 'message': usage_messages[quality]},
-              'application': application, 'delivery': delivery,
+              'next_reset_at': iso(facts['next_reset']), 'expires_at': iso(facts['expires']),
+              'state': facts['state'], 'enabled': facts['enabled'],
+              'business_state': business_state, 'status_label': status_label,
+              'usage': {'quality': quality, 'updated_at': iso(facts['observed']), 'message': usage_messages[quality]},
+              'application': facts['application'], 'delivery': delivery,
               'actions': {'billing': administrator and source_type == 'entitlement', 'quota': False, 'renew': False,
                           'grants': False, 'enable': False, 'reset': False}}
     if detail:

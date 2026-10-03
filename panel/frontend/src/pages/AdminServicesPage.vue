@@ -7,7 +7,7 @@ import BillingDrawer from '../components/BillingDrawer.vue'
 const items = ref<Service[]>([]), busy = ref(true), error = ref('')
 const q = ref(''), state = ref('all'), page = ref(1), selected = ref<Service | null>(null)
 const pagination = ref<Pagination>({ page: 1, page_size: 25, total: 0, pages: 0, has_next: false, has_previous: false })
-const statuses = [{ id: 'all', label: '全部状态' }, { id: 'active', label: '已应用' }, { id: 'pending', label: '待开通' }, { id: 'disabled', label: '已停用' }, { id: 'suspended', label: '已暂停' }, { id: 'expired', label: '已到期' }, { id: 'enforcement_pending', label: '等待生效' }, { id: 'metering_gap', label: '用量待核算' }, { id: 'simulated', label: '隔离验证' }]
+const statuses = [{ id: 'all', label: '全部状态' }, { id: 'active', label: '已应用且统计正常' }, { id: 'pending', label: '待开通' }, { id: 'disabled', label: '已停用' }, { id: 'suspended', label: '已暂停' }, { id: 'expired', label: '已到期' }, { id: 'enforcement_pending', label: '等待生效' }, { id: 'metering_gap', label: '计量存在缺口' }, { id: 'simulated', label: '隔离验证' }]
 let generation = 0
 async function load() {
   const current = ++generation
@@ -30,7 +30,7 @@ onMounted(load)
       <el-table-column label="已用" min-width="120"><template #default="{ row }">{{ formatGB(row.used_bytes, '暂无可靠统计') }}<div v-if="row.usage.quality !== 'measured' && row.used_bytes !== null" class="small muted">上次已确认</div></template></el-table-column>
       <el-table-column label="剩余" min-width="110"><template #default="{ row }">{{ formatGB(row.remaining_bytes, '待核算') }}</template></el-table-column>
       <el-table-column label="到期时间" min-width="175"><template #default="{ row }">{{ formatDate(row.expires_at) }}</template></el-table-column>
-      <el-table-column label="状态" min-width="130"><template #default="{ row }"><el-tag :type="row.state === 'active' ? 'success' : 'info'">{{ row.status_label }}</el-tag></template></el-table-column>
+      <el-table-column label="状态" min-width="130"><template #default="{ row }"><el-tag :type="row.business_state === 'active' ? 'success' : 'info'">{{ row.status_label }}</el-tag></template></el-table-column>
       <el-table-column label="操作" min-width="115"><template #default="{ row }"><el-button v-if="row.actions?.billing" link type="primary" @click="selected = row">重置时间</el-button><span v-else class="small muted">暂不可调整</span></template></el-table-column>
     </el-table></div>
     <div class="table-bottom"><p class="small muted">开通、额度、续期与授权将在执行能力接通后分别提供。</p><el-pagination :current-page="pagination.page" :page-size="pagination.page_size" :total="pagination.total" layout="total, prev, pager, next" @current-change="changePage" /></div>

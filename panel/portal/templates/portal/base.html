@@ -15,10 +15,22 @@
   <a class="skip-link" href="#main">跳到主要内容</a>
   <div class="app-shell">
     <aside class="sidebar" aria-label="主导航">
-      <a class="brand" href="/"><span class="brand-mark" aria-hidden="true">舟<span></span></span><span>{{ site_brand|default:'行舟' }}<small>连接管理</small></span></a>
+      <a class="brand" href="{% if frontend_workspace %}/app/#/services{% else %}/{% endif %}"><span class="brand-mark" aria-hidden="true">舟<span></span></span><span>{{ site_brand|default:'行舟' }}<small>连接管理</small></span></a>
       <nav class="navigation">
         {% if request.user.is_authenticated %}
         <span class="nav-label">我的空间</span>
+        {% if frontend_workspace %}
+        <a href="/app/#/services"><span class="nav-icon" aria-hidden="true">⌁</span>我的服务</a>
+        <a href="/app/#/guides"><span class="nav-icon" aria-hidden="true">▤</span>使用指南</a>
+        <a href="/app/#/account" {% if request.path == '/account/' %}aria-current="page"{% endif %}><span class="nav-icon" aria-hidden="true">◎</span>账号设置</a>
+        {% if request.user.is_staff %}
+        <span class="nav-label admin-label">管理空间</span>
+        <a href="/app/#/admin/overview"><span class="nav-icon" aria-hidden="true">◫</span>管理总览</a>
+        <a href="/app/#/admin/users"><span class="nav-icon" aria-hidden="true">♧</span>用户管理</a>
+        <a href="/app/#/admin/services"><span class="nav-icon" aria-hidden="true">↗</span>订阅管理</a>
+        <a href="/app/#/admin/rules"><span class="nav-icon" aria-hidden="true">↳</span>代理规则</a>
+        {% endif %}
+        {% else %}
         {% if not workspace_v2 %}<a href="/" {% if request.path == '/' %}aria-current="page"{% endif %}><span class="nav-icon" aria-hidden="true">◫</span>总览</a>{% endif %}
         <a href="/subscriptions/" {% if request.path == '/subscriptions/' or '/services/' in request.path or request.path == '/nodes/' or workspace_v2 and request.path == '/' %}aria-current="page"{% endif %}><span class="nav-icon" aria-hidden="true">⌁</span>{% if workspace_v2 %}我的服务{% else %}我的订阅{% endif %}</a>
         <a href="/guide/" {% if request.path == '/guide/' %}aria-current="page"{% endif %}><span class="nav-icon" aria-hidden="true">▤</span>使用指南</a>
@@ -34,6 +46,7 @@
         <a href="/manage/client-routing/" {% if '/manage/client-routing/' in request.path or '/manage/client-direct/' in request.path %}aria-current="page"{% endif %}><span class="nav-icon" aria-hidden="true">↳</span>代理规则</a>
         {% if monitor_url %}<a href="{{ monitor_url }}" target="_blank" rel="noopener noreferrer"><span class="nav-icon" aria-hidden="true">↗</span>服务器监控<span class="external-label">独立站点</span></a>{% endif %}
         {% endif %}
+        {% endif %}
         {% else %}
         <a href="/login/" {% if request.path == '/login/' %}aria-current="page"{% endif %}><span class="nav-icon" aria-hidden="true">↗</span>登录</a>
         <a href="/register/" {% if request.path == '/register/' %}aria-current="page"{% endif %}><span class="nav-icon" aria-hidden="true">◇</span>凭邀请加入</a>
@@ -47,7 +60,7 @@
         <div class="topbar-actions">
           {% if is_live %}<span class="badge neutral">已发布面板</span>{% else %}<span class="badge warning">本地候选 · 未上线</span>{% endif %}
           {% if request.user.is_authenticated %}
-          <a class="profile-link" href="/account/"><span class="avatar" aria-hidden="true">{{ request.user.username|first|upper }}</span><span class="username">{{ request.user.username }}</span></a>
+          <a class="profile-link" href="{% if frontend_workspace %}/app/#/account{% else %}/account/{% endif %}"><span class="avatar" aria-hidden="true">{{ request.user.username|first|upper }}</span><span class="username">{{ request.user.username }}</span></a>
           <form method="post" action="/logout/">{% csrf_token %}<button class="text-button" type="submit">退出</button></form>
           {% endif %}
         </div>

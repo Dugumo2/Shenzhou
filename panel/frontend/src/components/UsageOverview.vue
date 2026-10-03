@@ -3,12 +3,14 @@ import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { request, errorMessage } from '../api'
 import { formatDate, formatGB, integerBytes } from '../display'
 import { reliableUsagePercent } from '../usage-types'
+import UsageDashboard from './UsageDashboard.vue'
 import type { UsageOverviewData, UsagePeriod, UsageBytes } from '../usage-types'
 
-const props = defineProps<{ serviceId: string; refreshKey?: number }>()
+const props = defineProps<{ serviceId: string; refreshKey?: number; summaryOnly?: boolean }>()
 const period = ref<UsagePeriod>('current'), data = ref<UsageOverviewData | null>(null)
 const busy = ref(false), error = ref('')
 const recordsOpen = ref(false)
+const headingId = computed(() => 'usage-' + props.serviceId + (props.summaryOnly ? '-summary' : '-detail'))
 const periods: { id: UsagePeriod; label: string }[] = [{ id: 'current', label: '本期' }, { id: '7d', label: '近7天' }, { id: '30d', label: '近30天' }]
 const qualityLabel = computed(() => ({ measured: '已取得当前样本', stale: '统计已过期', gap: '统计存在缺口', unknown: '暂无可靠统计' })[data.value?.quality.state || 'unknown'])
 const percentage = computed(() => data.value ? reliableUsagePercent(data.value) : null)
@@ -32,23 +34,19 @@ function bytes(value: UsageBytes, unknown = '暂无可靠统计') {
 </script>
 
 <template>
-  <section class="surface usage-overview" aria-labelledby="usage-overview-title" :aria-busy="busy">
-    <div class="section-title"><div><h2 id="usage-overview-title">本期流量用量</h2><p class="small muted">查看套餐流量消耗与剩余。</p></div><el-button :loading="busy" @click="load">刷新统计</el-button></div>
+  <section class="surface usage-overview" :aria-labelledby="headingId" :aria-busy="busy">
+    <div class="section-title"><div><h2 :id="headingId">{{ summaryOnly ? '流量仪表盘' : '流量用量与统计图' }}</h2><p class="small muted">查看这份服务的额度占用与传输构成。</p></div><el-button :loading="busy" @click="load">刷新统计</el-button></div>
     <el-alert v-if="error" :title="error" type="error" show-icon :closable="false" />
     <el-skeleton v-if="busy" :rows="4" animated />
     <template v-if="data">
       <div class="quality-line"><el-tag :type="data.quality.state === 'measured' ? 'success' : 'warning'">{{ qualityLabel }}</el-tag><span class="small muted">最后采集：{{ data.quality.collected_at ? formatDate(data.quality.collected_at) : '暂无采集记录' }}</span></div>
       <p class="quality-note">{{ data.quality.message }}</p>
-      <dl class="metrics-grid usage-metrics">
-        <div><dt>本期额度</dt><dd>{{ bytes(data.summary.quota_bytes) }}</dd></div>
-        <div><dt>{{ data.quality.state === 'measured' ? '套餐已用' : '上次确认的套餐用量' }}</dt><dd :title="data.summary.charged_bytes === null ? undefined : data.summary.charged_bytes + ' 字节'">{{ bytes(data.summary.charged_bytes) }}</dd></div>
-        <div><dt>剩余流量</dt><dd>{{ bytes(data.summary.remaining_bytes, '待核算') }}</dd></div>
-      </dl>
-      <p class="small muted">套餐用量按上传、下载和各线路授权的流量倍率计算。</p>
-      <div v-if="percentage !== null" class="usage-progress"><div class="progress-caption"><span>本期已用 {{ percentage }}%</span></div><el-progress :percentage="percentage" :show-text="false" /></div>
-      <dl class="usage-dates"><div><dt>本期流量周期</dt><dd v-if="data.current_cycle">{{ formatDate(data.current_cycle.starts_at) }} 至 {{ formatDate(data.current_cycle.ends_at) }}</dd><dd v-else>当前周期尚未确认</dd></div><div><dt>下次流量重置</dt><dd>{{ formatDate(data.summary.next_reset_at) }}</dd></div></dl>
-      <details class="usage-records" :open="recordsOpen" @toggle="recordsOpen = ($event.target as HTMLDetailsElement).open"><summary>查看详细统计</summary>
-      <div class="history-heading"><h3>流量统计记录</h3><el-radio-group v-model="period" aria-label="统计记录时间范围" :disabled="busy"><el-radio-button v-for="option in periods" :key="option.id" :value="option.id">{{ option.label }}</el-radio-button></el-radio-group></div>
+      <div v-if="!summaryOnly" class="history-heading"><h3>统计范围</h3><el-radio-group v-model="period" aria-label="统计记录时间范围" :disabled="busy"><el-radio-button v-for="option in periods" :key="option.id" :value="option.id">{{ option.label }}</el-radio-button></el-radio-group></div>
+      <UsageDashboard :data="data" :compact="summaryOnly" />
+      <p class="small muted">套餐用量按上传、下载和授权倍率折算，原始传输量另列。</p>
+      <dl v-if="!summaryOnly" class="usage-dates"><div><dt>本期流量周期</dt><dd v-if="data.current_cycle">{{ formatDate(data.current_cycle.starts_at) }} 至 {{ formatDate(data.current_cycle.ends_at) }}</dd><dd v-else>当前周期尚未确认</dd></div><div><dt>下次流量重置</dt><dd>{{ formatDate(data.summary.next_reset_at) }}</dd></div></dl>
+      <details v-if="!summaryOnly" class="usage-records" :open="recordsOpen" @toggle="recordsOpen = ($event.target as HTMLDetailsElement).open"><summary>查看详细统计</summary>
+      <div class="history-heading"><h3>流量统计记录</h3></div>
       <p class="small muted">按统计记录的日期汇总，可能包含延迟上报的用量，不代表当天实际使用量；没有记录的日期不代表零流量。</p>
       <p v-if="period !== 'current'" class="small muted">记录范围：{{ formatDate(data.history.range_start) }} 至 {{ formatDate(data.history.range_end) }}</p>
       <template v-if="data.history.record_count && data.history.totals">
