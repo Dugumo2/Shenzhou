@@ -32,9 +32,9 @@ class ProviderUsageAPITests(P8FixtureMixin, TestCase):
         return service_usage(request, self.binding.public_id)
 
     def test_admin_owner_gets_separate_source_statistics_without_filling_quota(self):
-        with patch('portal.provider_usage.read_provider_usage', return_value={'state':'available'}) as read:
+        with patch('portal.resource_usage_view.read_resource_usage_view', return_value={'schema_version':2,'meters':[]}) as read:
             result = json.loads(self.response().content)['data']
-        self.assertEqual(result['provider_usage']['state'], 'available')
+        self.assertEqual(result['provider_usage']['schema_version'], 2)
         read.assert_called_once_with(self.source['path'])
         self.assertIsNone(result['summary']['remaining_bytes'])
         self.assertIsNone(result['summary']['charged_bytes'])
@@ -44,21 +44,21 @@ class ProviderUsageAPITests(P8FixtureMixin, TestCase):
         self.assertEqual(metadata['application']['state'], 'verification_required')
 
     def test_other_staff_does_not_read_provider_file(self):
-        with patch('portal.provider_usage.read_provider_usage') as read:
+        with patch('portal.resource_usage_view.read_resource_usage_view') as read:
             self.assertEqual(self.response(self.other).status_code, 404)
             read.assert_not_called()
 
     def test_nonstaff_owner_does_not_receive_whole_server_bill(self):
         self.owner.is_staff = False; self.owner.save(update_fields=['is_staff'])
-        with patch('portal.provider_usage.read_provider_usage') as read:
+        with patch('portal.resource_usage_view.read_resource_usage_view') as read:
             result = json.loads(self.response().content)['data']
             self.assertNotIn('provider_usage', result)
             read.assert_not_called()
 
     def test_wrong_source_disabled_feature_and_invalid_binding_never_read_file(self):
         for override in ({'PROVIDER_USAGE_SOURCE':{**self.source,'source_id':'other'}}, {'PROVIDER_USAGE_SOURCE':{}}, {'P8_COMPAT_ENABLED':False}):
-            with override_settings(**override), patch('portal.provider_usage.read_provider_usage') as read:
+            with override_settings(**override), patch('portal.resource_usage_view.read_resource_usage_view') as read:
                 self.response(); read.assert_not_called()
         P8SourceBinding.objects.filter(pk=self.binding.pk).update(enabled=False)
-        with patch('portal.provider_usage.read_provider_usage') as read:
+        with patch('portal.resource_usage_view.read_resource_usage_view') as read:
             self.response(); read.assert_not_called()

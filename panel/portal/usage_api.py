@@ -115,7 +115,7 @@ def service_usage(request, public_id):
         if (kind == 'p8' and item['state'] != 'mapping_required' and request.user.is_staff
                 and source and record.source_instance == source['source_instance']
                 and record.source_id == source['source_id']):
-            from .provider_usage import read_provider_usage
-            value['provider_usage'] = read_provider_usage(source['path'])
+            from .resource_usage_view import read_resource_usage_view
+            value['provider_usage'] = read_resource_usage_view(source['path'])
         return success(value)
     return success(_service(record, kind, period, timezone.now()))
