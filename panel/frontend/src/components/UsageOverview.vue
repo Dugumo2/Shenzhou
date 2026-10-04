@@ -44,7 +44,7 @@ function bytes(value: UsageBytes, unknown = '暂无可靠统计') {
       <div v-if="!summaryOnly" class="history-heading"><h3>统计范围</h3><el-radio-group v-model="period" aria-label="统计记录时间范围" :disabled="busy"><el-radio-button v-for="option in periods" :key="option.id" :value="option.id">{{ option.label }}</el-radio-button></el-radio-group></div>
       <UsageDashboard :data="data" :compact="summaryOnly" />
       <p class="small muted">套餐用量按上传、下载和授权倍率折算，原始传输量另列。</p>
-      <dl v-if="!summaryOnly" class="usage-dates"><div><dt>本期流量周期</dt><dd v-if="data.current_cycle">{{ formatDate(data.current_cycle.starts_at) }} 至 {{ formatDate(data.current_cycle.ends_at) }}</dd><dd v-else>当前周期尚未确认</dd></div><div><dt>下次流量重置</dt><dd>{{ formatDate(data.summary.next_reset_at) }}</dd></div></dl>
+      <dl v-if="!summaryOnly" class="usage-dates"><div><dt>本期流量周期</dt><dd v-if="data.current_cycle">{{ formatDate(data.current_cycle.starts_at) }} 至 {{ formatDate(data.current_cycle.ends_at) }}</dd><dd v-else>当前周期尚未确认</dd></div><div><dt>下次流量重置</dt><dd>{{ data.source_type === 'p8' && !data.summary.next_reset_at ? '暂不可确认' : formatDate(data.summary.next_reset_at) }}</dd></div></dl>
       <details v-if="!summaryOnly" class="usage-records" :open="recordsOpen" @toggle="recordsOpen = ($event.target as HTMLDetailsElement).open"><summary>查看详细统计</summary>
       <div class="history-heading"><h3>流量统计记录</h3></div>
       <p class="small muted">按统计记录的日期汇总，可能包含延迟上报的用量，不代表当天实际使用量；没有记录的日期不代表零流量。</p>
@@ -53,7 +53,7 @@ function bytes(value: UsageBytes, unknown = '暂无可靠统计') {
         <div class="usage-table-scroll"><table class="usage-table"><caption>所选范围已确认套餐用量 {{ bytes(data.history.totals.charged_bytes) }}</caption><thead><tr><th scope="col">记录日期</th><th scope="col">套餐用量</th><th scope="col">上传</th><th scope="col">下载</th></tr></thead><tbody><tr v-for="day in data.history.days" :key="day.date"><th scope="row">{{ day.date }}</th><td>{{ bytes(day.charged_bytes) }}</td><td>{{ bytes(day.upload_bytes) }}</td><td>{{ bytes(day.download_bytes) }}</td></tr></tbody></table></div>
         <p v-if="data.history.days_truncated" class="small muted">仅列出最近 {{ data.history.day_limit }} 个有记录的日期；汇总包含所选范围的全部已确认记录。</p>
       </template>
-      <p v-else class="inline-note">{{ data.source_type === 'membership' ? '此服务暂无可靠统计，请联系管理员核对。' : '所选范围暂无已确认记录，不代表没有使用流量。' }}</p>
+      <p v-else class="inline-note">{{ data.source_type === 'membership' || data.source_type === 'p8' ? '此服务暂无可靠统计，请联系管理员核对。' : '所选范围暂无已确认记录，不代表没有使用流量。' }}</p>
       <p v-if="data.history.excluded_record_count" class="quality-note">另有 {{ data.history.excluded_record_count }} 条待核验记录，暂未计入汇总。</p>
       <p class="small muted">上传和下载显示原始传输量；套餐用量按当时的倍率折算，历史不会重新计算。1 GB = 1,000,000,000 字节。</p>
       </details>

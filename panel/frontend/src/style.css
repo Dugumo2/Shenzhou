@@ -76,6 +76,7 @@ h1,h2,h3,h4,p{margin-top:0}h1{font-size:30px;line-height:1.35;margin-bottom:10px
 .shell-mobile-drawer .shell-nav-link{min-height:var(--sz-touch-size);height:auto}
 .shell-mobile-drawer .shell-icon-button{width:var(--sz-touch-size);height:var(--sz-touch-size)}
 .shell-mobile-drawer .workspace-return{margin-top:auto}
+.shell-mobile-drawer .shell-navigation+.shell-mobile-space-navigation{margin-top:16px}
 .page-frame{min-width:0}
 .page-frame-heading,.page-frame-actions{display:flex;align-items:center;justify-content:space-between;gap:16px}
 .page-frame-heading{margin-bottom:var(--sz-content-space)}
@@ -100,6 +101,7 @@ h1,h2,h3,h4,p{margin-top:0}h1{font-size:30px;line-height:1.35;margin-bottom:10px
 .shell-main .page-title>div,.shell-main .section-title>div{min-width:0}
 .shell-main h1,.shell-main h2,.shell-main dd{overflow-wrap:anywhere}
 @media(max-width:1100px){.shell-header{gap:12px}.shell-account-menu .username{max-width:84px}}
+@media(min-width:801px) and (max-width:1100px){.workspace-shell-staff .shell-user-navigation .shell-icon{display:none}.workspace-shell-staff .shell-user-navigation .shell-nav-link{padding:0 6px}.workspace-shell-staff .shell-account-menu .username{max-width:64px}}
 @media(max-width:800px){
   .workspace-shell{--sz-content-space:24px}
   .shell-header{padding:0 12px;gap:8px}

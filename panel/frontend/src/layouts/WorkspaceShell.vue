@@ -10,6 +10,11 @@ defineEmits<{ logout: [] }>()
 const collapsed = ref(false), mobile = ref(false), mobileOpen = ref(false)
 const menuTrigger = ref<HTMLButtonElement | null>(null), drawer = ref<HTMLElement | null>(null), main = ref<HTMLElement | null>(null), accountMenu = ref<HTMLDetailsElement | null>(null)
 const groups = computed(() => navigationForWorkspace(props.admin))
+const topNavigation = computed(() => navigationForWorkspace(false).map(group => ({
+  ...group,
+  items: props.isStaff ? [...group.items, { path: '/admin/overview', label: '管理面板', icon: 'overview' as const }] : group.items,
+})))
+const topNavigationPath = computed(() => props.admin ? '/admin/overview' : props.path)
 const breadcrumbs = computed(() => breadcrumbsForPath(props.path))
 let media: MediaQueryList | undefined
 let previousOverflow = ''
@@ -79,20 +84,20 @@ onUnmounted(() => {
 })
 </script>
 <template>
-  <div class="workspace-shell" :class="{ 'workspace-shell-admin': admin, 'workspace-shell-collapsed': admin && collapsed }">
+  <div class="workspace-shell" :class="{ 'workspace-shell-admin': admin, 'workspace-shell-collapsed': admin && collapsed, 'workspace-shell-staff': isStaff }">
     <div class="workspace-stage" :inert="mobileOpen ? true : undefined">
       <a href="#workspace-main" class="skip-navigation" @click.prevent="focusMain">跳到页面内容</a>
       <header class="shell-header">
         <RouterLink :to="admin ? '/admin/overview' : '/services'" class="brand shell-brand" :aria-label="admin ? '神舟云管理总览' : '神舟云首页'"><span class="brand-symbol">舟</span><span>神舟云</span></RouterLink>
         <button v-if="admin || mobile" ref="menuTrigger" type="button" class="shell-icon-button shell-menu-toggle" :aria-label="mobile ? '打开导航菜单' : collapsed ? '展开侧栏' : '折叠侧栏'" :aria-expanded="mobile ? mobileOpen : !collapsed" :aria-controls="mobile ? 'mobile-navigation' : 'desktop-navigation'" @click="toggleNavigation"><ShellIcon :name="mobile ? 'menu' : collapsed ? 'expand' : 'collapse'" /></button>
         <nav class="shell-breadcrumbs" aria-label="当前位置"><ol><li v-for="(item, index) in breadcrumbs" :key="item.label"><span v-if="index" class="breadcrumb-divider" aria-hidden="true">/</span><RouterLink v-if="item.path" :to="item.path">{{ item.label }}</RouterLink><span v-else :aria-current="index === breadcrumbs.length - 1 ? 'page' : undefined">{{ item.label }}</span></li></ol></nav>
-        <ShellNavigation v-if="!admin && !mobile" class="shell-user-navigation" :groups="groups" :path="path" horizontal />
+        <ShellNavigation v-if="!mobile" class="shell-user-navigation" :groups="topNavigation" :path="topNavigationPath" horizontal />
         <details ref="accountMenu" class="shell-account-menu">
           <summary :title="username" aria-label="账号菜单"><ShellIcon name="account" /><span class="username">{{ username }}</span><ShellIcon name="chevron" /></summary>
           <div class="shell-account-popover">
             <p class="shell-account-name">{{ username }}</p>
             <RouterLink to="/account">账号设置</RouterLink>
-            <RouterLink v-if="isStaff && !admin" to="/admin/overview">管理面板</RouterLink>
+            <RouterLink v-if="isStaff" to="/admin/overview">管理面板</RouterLink>
             <RouterLink v-if="admin" to="/services">我的服务</RouterLink>
             <button type="button" :disabled="logoutBusy" @click="$emit('logout')">{{ logoutBusy ? '正在退出…' : '退出登录' }}</button>
           </div>
@@ -115,7 +120,8 @@ onUnmounted(() => {
     <div v-if="mobileOpen" class="shell-mobile-mask" @click.self="closeMobile()">
       <aside id="mobile-navigation" ref="drawer" class="shell-mobile-drawer" role="dialog" aria-modal="true" aria-labelledby="mobile-navigation-title">
         <div class="shell-drawer-heading"><strong id="mobile-navigation-title">{{ admin ? '管理导航' : '我的空间' }}</strong><button type="button" class="shell-icon-button" aria-label="关闭导航菜单" @click="closeMobile()"><ShellIcon name="close" /></button></div>
-        <ShellNavigation :groups="groups" :path="path" @navigate="closeMobile('navigation')" />
+        <ShellNavigation v-if="admin" :groups="groups" :path="path" @navigate="closeMobile('navigation')" />
+        <ShellNavigation class="shell-mobile-space-navigation" :groups="topNavigation" :path="topNavigationPath" @navigate="closeMobile('navigation')" />
         <RouterLink v-if="admin" to="/services" class="shell-nav-link workspace-return" @click="closeMobile('navigation')"><ShellIcon name="return" /><span>切回我的服务</span></RouterLink>
       </aside>
     </div>

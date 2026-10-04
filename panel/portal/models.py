@@ -525,3 +525,58 @@ class RuleSourceVersion(models.Model):
             models.CheckConstraint(condition=models.Q(revision__gte=1), name='rule_source_version_positive'),
             models.CheckConstraint(condition=models.Q(count__lte=500), name='rule_source_version_count_limit'),
         ]
+
+
+class P8SourceBinding(models.Model):
+    """独立 P8 来源的指定本人绑定；没有套餐、节点凭据或秘密链接。"""
+    public_id = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
+    source_instance = models.CharField(max_length=96)
+    source_id = models.CharField(max_length=96)
+    owner = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT,
+                              related_name='p8_source_bindings')
+    legacy_membership = models.OneToOneField(Membership, null=True, blank=True,
+                                             on_delete=models.PROTECT, related_name='p8_binding')
+    verified_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True,
+                                    on_delete=models.PROTECT, related_name='verified_p8_bindings')
+    enabled = models.BooleanField(default=False)
+    state = models.CharField(max_length=12, default='unverified', choices=[
+        ('unverified', '未核验'), ('verified', '已核验'), ('revoked', '已撤销')])
+    revision = models.PositiveIntegerField(default=1)
+    verified_at = models.DateTimeField(null=True, blank=True)
+    evidence_sha256 = models.CharField(max_length=64)
+    links_sha256 = models.CharField(max_length=64)
+    verification_sha256 = models.CharField(max_length=64, blank=True, default='')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def clean(self):
+        from django.core.exceptions import ValidationError
+        from django.utils import timezone
+        from .p8_compat import DIGEST, SOURCE_ID, binding_verification_sha256
+        errors = {}
+        for name in ('source_instance', 'source_id'):
+            if not SOURCE_ID.fullmatch(getattr(self, name) or ''):
+                errors[name] = '来源标识必须为明确的字母数字、点、横线或下划线。'
+        for name in ('evidence_sha256', 'links_sha256'):
+            if not DIGEST.fullmatch(getattr(self, name) or ''):
+                errors[name] = '必须提供64位小写SHA256摘要。'
+        if self.state == 'verified' and (self.verified_at is None or self.verified_at > timezone.now()
+                or self.verified_by_id is None or not self.verified_by.is_active or not self.verified_by.is_staff):
+            errors['state'] = '已核验绑定需要当前有效管理员和真实核验时间。'
+        if self.state == 'verified' and self.verification_sha256 != binding_verification_sha256(self):
+            errors['verification_sha256'] = '归属或来源已变化，必须重新显式核验当前绑定。'
+        if self.legacy_membership_id:
+            if (self.legacy_membership.user_id != self.owner_id
+                    or LegacyServiceBinding.objects.filter(membership_id=self.legacy_membership_id).exists()
+                    or Entitlement.objects.filter(user_id=self.owner_id).exists()):
+                errors['legacy_membership'] = '会员归属冲突或已有其他权益映射，请先人工核对。'
+        if errors:
+            raise ValidationError(errors)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=['source_instance', 'source_id'], name='unique_p8_source_binding'),
+            models.CheckConstraint(condition=models.Q(revision__gte=1), name='p8_binding_positive_revision'),
+            models.CheckConstraint(condition=models.Q(state__in=['unverified', 'verified', 'revoked']),
+                                   name='p8_binding_known_state'),
+        ]

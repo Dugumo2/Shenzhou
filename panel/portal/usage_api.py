@@ -95,6 +95,7 @@ def _service(record, source_type, period, now):
 
 @endpoint()
 def service_usage(request, public_id):
+    from . import p8_compat
     periods = request.GET.getlist('period')
     period = periods[0] if periods else 'current'
     if len(periods) > 1 or period not in PERIODS:
@@ -104,6 +105,22 @@ def service_usage(request, public_id):
         value = uuid.UUID(public_id)
     except (ValueError, TypeError, AttributeError):
         return error('not_found', '服务不存在或不可访问。', 404)
+    p8_usage = p8_compat.service_usage(request.user, value, period)
+    if p8_usage is not None:
+        return success(p8_usage)
+    # 显式关联失效或冲突时，旧会员UUID不得借别名回到可信额度/账本。
+    from .models import Membership
+    disputed = Membership.objects.filter(user=request.user, public_id=value,
+                                          pk__in=p8_compat.claimed_membership_ids(request.user)).first()
+    if disputed is not None:
+        data = _service(disputed, 'membership', period, timezone.now())
+        data['current_cycle'] = None
+        data['summary'] = {key: None for key in ('quota_bytes','charged_bytes','upload_bytes','download_bytes','remaining_bytes','next_reset_at')}
+        data['summary']['quota_state'] = 'unknown'
+        data['quality'] = {'state':'unknown','message':'来源关联需要重新核对，暂无可靠统计。','collected_at':None}
+        data['history'].update(totals=None, record_count=0, excluded_record_count=0, days=[], days_truncated=False,
+                               message='来源关联待核对；没有记录不代表零流量。')
+        return success(data)
     record = service_queryset().filter(user=request.user, public_id=value).first()
     if record is None:
         # 与服务详情保持相同的已核验旧UUID别名；坏绑定不能绕过列表门禁。

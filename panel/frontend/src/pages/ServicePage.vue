@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { request, errorMessage } from '../api'
 import type { Client, Service } from '../types'
 import ServiceMetrics from '../components/ServiceMetrics.vue'
 import UsageOverview from '../components/UsageOverview.vue'
 import DeliveryResources from '../components/DeliveryResources.vue'
+import P8DeliveryResources from '../components/P8DeliveryResources.vue'
 import { auth } from '../auth'
 const route = useRoute()
 const service = ref<Service | null>(null), clients = ref<Client[]>([])
@@ -28,6 +29,7 @@ watch(clientId, value => { choosing.value = !value })
 let generation = 0
 async function load() {
   const current = ++generation
+  if (service.value?.source_type === 'p8') service.value = null
   busy.value = true; error.value = ''
   try {
     const [detail, catalog] = await Promise.all([request<Service>('/me/services/' + encodeURIComponent(String(route.params.id))), request<{ items: Client[] }>('/catalog/clients')])
@@ -37,10 +39,12 @@ async function load() {
 }
 onMounted(load)
 watch(() => route.params.id, () => { service.value = null; device.value = ''; activeSection.value = 'overview'; void load() })
+watch(() => auth.session?.user?.username, () => { generation++; service.value = null; clients.value = []; device.value = ''; activeSection.value = 'overview'; if (auth.session?.authenticated) void load() })
+onBeforeUnmount(() => { generation++ })
 </script>
 <template>
   <RouterLink to="/services" class="back-link">← 我的服务</RouterLink>
-  <div class="page-title"><div><p class="eyebrow">服务详情</p><h1>神舟云 <span class="short-id">#{{ String(route.params.id).slice(0, 8) }}</span></h1></div><el-button :loading="busy" @click="load">刷新</el-button></div>
+  <div class="page-title"><div><p class="eyebrow">服务详情</p><h1>神舟云 <span class="short-id">#{{ String(service?.id || route.params.id).slice(0, 8) }}</span></h1></div><el-button :loading="busy" @click="load">刷新</el-button></div>
   <el-alert v-if="error" :title="error" type="error" show-icon :closable="false" class="spaced" />
   <el-skeleton v-if="busy && !service" :rows="6" animated />
   <template v-if="service">
@@ -64,7 +68,8 @@ watch(() => route.params.id, () => { service.value = null; device.value = ''; ac
       <el-button v-if="selected" class="spaced" @click="choosing = false">继续使用 {{ selected.name }}</el-button>
       </template>
       <div v-if="selected" v-show="!choosing" class="software-result">
-        <DeliveryResources v-if="auth.session?.environment?.is_demo" :key="service.id + ':' + selected.id" :service-id="service.id" :client-id="selected.id" />
+        <P8DeliveryResources v-if="service.source_type === 'p8'" :key="service.id + ':' + selected.id" :service-id="service.id" :client-id="selected.id" :refresh-key="refreshKey" />
+        <DeliveryResources v-else-if="auth.session?.environment?.is_demo" :key="service.id + ':' + selected.id" :service-id="service.id" :client-id="selected.id" />
         <template v-else-if="downloadUrl">
           <el-button tag="a" :href="downloadUrl" target="_blank" rel="noopener">下载资源</el-button>
           <p class="small muted">下载完成后仍需在软件中导入并应用；下载成功不代表客户端已生效。</p>

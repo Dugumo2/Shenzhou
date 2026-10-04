@@ -3,9 +3,11 @@ import { onMounted, onUnmounted, ref } from 'vue'
 import { errorMessage, request } from '../api'
 import { formatDate } from '../display'
 import type { AdminOverview } from '../adminTypes'
+import ObservedSite from '../components/ObservedSite.vue'
 
 const overview = ref<AdminOverview | null>(null)
 const busy = ref(true), error = ref('')
+const observedAvailable = ref(false)
 let generation = 0
 function count(value: number | null): string {
   return value !== null && Number.isSafeInteger(value) && value >= 0 ? value.toLocaleString('zh-CN') : '尚未汇总'
@@ -22,6 +24,9 @@ onUnmounted(() => { generation++ })
 </script>
 <template>
   <div class="page-title"><div><p class="eyebrow">管理员工作区</p><h1>管理总览</h1><p class="muted">查看已登记的用户、服务与需要核对的事项。</p></div><el-button :loading="busy" @click="load">刷新</el-button></div>
+  <ObservedSite @loaded="observedAvailable = observedAvailable || $event" />
+  <component :is="observedAvailable ? 'details' : 'div'">
+  <summary v-if="observedAvailable">本地候选统计</summary>
   <el-alert v-if="error" :title="error" type="error" show-icon :closable="false" class="spaced" />
   <el-skeleton v-if="busy && !overview" :rows="8" animated />
   <template v-if="overview">
@@ -35,4 +40,5 @@ onUnmounted(() => { generation++ })
     </section>
     <section v-if="overview.limitations.length" class="surface overview-section"><h2>当前数据范围</h2><ul class="overview-limitations"><li v-for="(item, index) in overview.limitations" :key="index">{{ item }}</li></ul></section>
   </template>
+  </component>
 </template>

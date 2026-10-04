@@ -5,10 +5,10 @@ export type UsageBytes = string | null
 export interface UsageTotals { upload_bytes: UsageBytes; download_bytes: UsageBytes; charged_bytes: UsageBytes }
 export interface UsageDay extends UsageTotals { date: string; record_count: number }
 export interface UsageOverviewData {
-  service_id: string; source_type: 'entitlement' | 'membership'; time_zone: 'Asia/Shanghai'
+  service_id: string; source_type: 'entitlement' | 'membership' | 'p8'; time_zone: 'Asia/Shanghai'
   generated_at: string; period: UsagePeriod
   current_cycle: { starts_at: string; ends_at: string } | null
-  summary: UsageTotals & { quota_bytes: UsageBytes; quota_state: 'applied' | 'configured'; remaining_bytes: UsageBytes; next_reset_at: string | null }
+  summary: UsageTotals & { quota_bytes: UsageBytes; quota_state: 'applied' | 'configured' | 'unknown'; remaining_bytes: UsageBytes; next_reset_at: string | null }
   quality: { state: 'measured' | 'stale' | 'gap' | 'unknown'; message: string; collected_at: string | null }
   history: { kind: 'confirmed_ledger_postings'; date_basis: 'created_at'; range_start: string | null; range_end: string | null
     totals: UsageTotals | null; record_count: number; excluded_record_count: number; days: UsageDay[]

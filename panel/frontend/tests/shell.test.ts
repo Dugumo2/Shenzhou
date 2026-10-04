@@ -143,6 +143,52 @@ test('普通用户只有独立三项导航，服务详情与指南切换不生�
   assert.equal(nav.querySelector<Element>('[aria-current="page"]')!.props.href, '#/guides')
 })
 
+test('管理员两空间常驻公共栏目顺序相同，管理入口可达且账号下拉仍保留', async t => {
+  const ui = mount({ admin: false, staff: true, path: '/services' }); t.after(() => ui.unmount()); await ui.ready
+  const paths = () => descendants(ui.find(node => hasClass(node, 'shell-user-navigation'))).filter(node => node.tag === 'a').map(node => node.props.href)
+  const expected = ['#/services', '#/guides', '#/account', '#/admin/overview']
+  assert.deepEqual(paths(), expected)
+  const menu = ui.find(node => hasClass(node, 'shell-account-popover'))
+  assert.ok(descendants(menu).some(node => node.props.href === '#/admin/overview'))
+  await ui.click(descendants(ui.find(node => hasClass(node, 'shell-user-navigation'))).find(node => node.props.href === '#/admin/overview')!)
+  assert.equal(ui.state.admin, true)
+  assert.deepEqual(paths(), expected)
+  assert.equal(ui.find(node => hasClass(node, 'shell-user-navigation')).querySelector<Element>('[aria-current="page"]')!.props.href, '#/admin/overview')
+  assert.ok(descendants(ui.find(node => hasClass(node, 'shell-account-popover'))).some(node => node.props.href === '#/admin/overview'))
+  assert.ok(descendants(ui.find(node => hasClass(node, 'shell-account-popover'))).some(node => node.tag === 'button'))
+  ui.state.path = '/admin/services'; await flush()
+  assert.equal(ui.find(node => hasClass(node, 'shell-user-navigation')).querySelector<Element>('[aria-current="page"]')!.props.href, '#/admin/overview')
+  await ui.click(descendants(ui.find(node => hasClass(node, 'shell-user-navigation'))).find(node => node.props.href === '#/services')!)
+  assert.equal(ui.state.admin, false)
+  assert.deepEqual(paths(), expected)
+  assert.equal(ui.find(node => hasClass(node, 'shell-user-navigation')).querySelector<Element>('[aria-current="page"]')!.props.href, '#/services')
+})
+
+test('手机管理员能从导航同层进入和离开管理空间，普通用户无管理入口', async t => {
+  const ui = mount({ admin: false, staff: true, mobile: true, path: '/services' }); t.after(() => ui.unmount()); await ui.ready
+  await ui.click(ui.find(node => hasClass(node, 'shell-menu-toggle')))
+  let drawer = ui.find(node => node.props.role === 'dialog')
+  let common = descendants(drawer).find(node => hasClass(node, 'shell-mobile-space-navigation'))!
+  assert.deepEqual(descendants(common).filter(node => node.tag === 'a').map(node => node.props.href), ['#/services', '#/guides', '#/account', '#/admin/overview'])
+  await ui.click(descendants(common).find(node => node.props.href === '#/admin/overview')!)
+  assert.equal(ui.state.admin, true)
+  assert.equal(ui.all().some(node => node.props.role === 'dialog'), false)
+  assert.equal(ui.document.activeElement?.props.id, 'workspace-main')
+  await ui.click(ui.find(node => hasClass(node, 'shell-menu-toggle')))
+  drawer = ui.find(node => node.props.role === 'dialog')
+  common = descendants(drawer).find(node => hasClass(node, 'shell-mobile-space-navigation'))!
+  assert.equal(common.querySelector<Element>('[aria-current="page"]')!.props.href, '#/admin/overview')
+  assert.ok(descendants(drawer).some(node => node.props.href === '#/admin/servers'))
+  await ui.click(descendants(common).find(node => node.props.href === '#/services')!)
+  assert.equal(ui.state.admin, false)
+  assert.equal(ui.all().some(node => node.props.role === 'dialog'), false)
+  ui.unmount()
+  const user = mount({ admin: false, staff: false, mobile: true, path: '/services' }); t.after(() => user.unmount()); await user.ready
+  await user.click(user.find(node => hasClass(node, 'shell-menu-toggle')))
+  assert.deepEqual(descendants(user.find(node => node.props.role === 'dialog')).filter(node => node.tag === 'a').map(node => node.props.href), ['#/services', '#/guides', '#/account'])
+  assert.equal(user.all().some(node => node.tag === 'a' && String(node.props.href).startsWith('#/admin/')), false)
+})
+
 test('手机导航打开后聚焦当前页并锁定背景；Tab循环，导航关闭后聚焦正文', async t => {
   const ui = mount({ mobile: true }); t.after(() => ui.unmount()); await ui.ready
   await ui.click(ui.find(node => hasClass(node, 'shell-menu-toggle')))

@@ -5,12 +5,15 @@ from . import api
 from . import admin_api, guide_api
 from . import rule_api, usage_api, candidate_delivery
 from . import inventory_api, rule_source_api
+from . import p8_compat_api
+from . import observation_api
 
 
 app_name = 'api'
 urlpatterns = [
     path('catalog/guides', guide_api.guides, name='guides'),
     path('admin/overview', admin_api.overview, name='admin_overview'),
+    path('admin/observed-site', observation_api.observed_site, name='observed_site'),
     path('admin/users', admin_api.users, name='admin_users'),
     path('admin/users/<str:user_id>', admin_api.user_detail, name='admin_user_detail'),
     path('session', api.session, name='session'),
@@ -19,6 +22,7 @@ urlpatterns = [
     path('me/services', api.my_services, name='my_services'),
     path('me/services/<str:public_id>', api.my_service_detail, name='my_service_detail'),
     path('me/services/<str:public_id>/usage', usage_api.service_usage, name='service_usage'),
+    path('me/services/<str:public_id>/p8-delivery', p8_compat_api.delivery, name='p8_delivery'),
     path('me/services/<str:public_id>/delivery', candidate_delivery.delivery, name='candidate_delivery'),
     path('me/services/<str:public_id>/delivery/<str:client_id>/resources/<str:resource>', candidate_delivery.download_resource, name='candidate_resource'),
     path('catalog/clients', api.clients, name='clients'),

@@ -24,7 +24,7 @@ onMounted(load)
     <div class="usage-number">{{ formatGB(service.used_bytes, '暂无可靠统计') }}<span> / {{ formatGB(service.quota_bytes) }}</span></div>
     <el-progress v-if="service.usage.quality === 'measured' && service.quota_state === 'applied' && service.remaining_bytes !== null && usagePercent(service.used_bytes, service.quota_bytes) !== null" :percentage="usagePercent(service.used_bytes, service.quota_bytes) || 0" :show-text="false" :stroke-width="7" />
     <p v-else class="muted small">{{ service.usage.message || '当前用量暂不可确认。' }}</p>
-    <dl class="card-facts"><div><dt>剩余额度</dt><dd>{{ formatGB(service.remaining_bytes, '待核算') }}</dd></div><div><dt>到期时间</dt><dd>{{ formatDate(service.expires_at) }}</dd></div><div><dt>下次流量重置</dt><dd>{{ formatDate(service.next_reset_at) }}</dd></div></dl>
+    <dl class="card-facts"><div><dt>剩余额度</dt><dd>{{ formatGB(service.remaining_bytes, '待核算') }}</dd></div><div><dt>到期时间</dt><dd>{{ service.source_type === 'p8' && !service.expires_at ? '暂不可确认' : formatDate(service.expires_at) }}</dd></div><div><dt>下次流量重置</dt><dd>{{ service.source_type === 'p8' && !service.next_reset_at ? '暂不可确认' : formatDate(service.next_reset_at) }}</dd></div></dl>
     <RouterLink :to="'/services/' + service.id" class="card-link">查看服务与使用方法 <span>→</span></RouterLink>
   </article></div>
 </template>

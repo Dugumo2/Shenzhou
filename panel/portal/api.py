@@ -15,7 +15,7 @@ from django.utils import timezone
 from django.views.csrf import csrf_failure as html_csrf_failure
 from django.views.decorators.debug import sensitive_variables
 
-from .api_helpers import (CLIENTS, client_catalog, compatibility_for, iso,
+from .api_helpers import (CLIENTS, client_catalog, compatibility_for, iso, legacy_services,
                           matching_service_ids, project_service, service_queryset, visible_legacy_services)
 from .legacy_binding import verified_legacy_bindings
 from .client_rules import PROTECTED, policy_document, validate_rule
@@ -131,17 +131,41 @@ def logout(request):
 
 @endpoint()
 def my_services(request):
+    from . import p8_compat
     record = service_queryset().filter(user=request.user).first()
-    legacy = visible_legacy_services().select_related('user').filter(user=request.user).first()
+    claimed = set(p8_compat.claimed_membership_ids(request.user))
+    bound = set(p8_compat.bound_membership_ids(request.user))
+    legacy = visible_legacy_services().select_related('user').filter(user=request.user).exclude(pk__in=bound).first()
     items = [project_service(record, 'entitlement')] if record else []
     if legacy is not None:
-        items.append(project_service(legacy, 'membership'))
+        item = project_service(legacy, 'membership')
+        items.append(unresolved_p8_service(item) if legacy.pk in claimed else item)
+    items.extend(p8_compat.list_services(request.user))
+    compatibility = compatibility_for(request.user.pk, record is not None)
+    if claimed - bound:
+        compatibility = {'state': 'mapping_required', 'message': '部分服务资料需要管理员重新核对，暂不提供资源。'}
     return success({'items': items, 'service_count': len(items),
-                    'compatibility': compatibility_for(request.user.pk, record is not None)})
+                    'compatibility': compatibility})
+
+
+def unresolved_p8_service(item):
+    """显式来源关联失效时，不回退展示未应用的会员额度或旧交付入口。"""
+    for key in ('quota_bytes', 'used_bytes', 'raw_bytes', 'remaining_bytes', 'next_reset_at', 'expires_at'):
+        item[key] = None
+    item.update(state='mapping_required', business_state='mapping_required', enabled=False,
+                status_label='资料待核对', quota_state='unknown')
+    item['usage'] = {'quality': 'unknown', 'updated_at': None, 'message': '来源关联需要重新核对，当前额度与用量暂不可确认。'}
+    item['delivery'] = {'state': 'blocked', 'message': '请联系管理员核对服务资料。', 'download_url': None}
+    item['actions'] = {key: False for key in ('billing', 'quota', 'renew', 'grants', 'enable', 'reset')}
+    item['compatibility'] = {'state': 'mapping_required', 'message': '来源关联需要重新核对。'}
+    for client in item.get('clients', []):
+        client['delivery'] = dict(item['delivery'])
+    return item
 
 
 @endpoint()
 def my_service_detail(request, public_id):
+    from . import p8_compat
     try:
         value = uuid.UUID(public_id)
     except (ValueError, TypeError, AttributeError):
@@ -149,6 +173,13 @@ def my_service_detail(request, public_id):
     record = service_queryset().filter(user=request.user, public_id=value).first()
     if record is not None:
         return success(project_service(record, 'entitlement', detail=True))
+    existing = p8_compat.service_detail(request.user, value)
+    if existing is not None:
+        return success(existing)
+    claimed = p8_compat.claimed_membership_ids(request.user)
+    disputed = legacy_services().filter(user=request.user, public_id=value, pk__in=claimed).first()
+    if disputed is not None:
+        return success(unresolved_p8_service(project_service(disputed, 'membership', detail=True)))
     # 已核验合并的旧UUID指向同一目标投影，未核验或坏绑定不能通过详情绕过列表。
     binding = verified_legacy_bindings().filter(owner=request.user, membership__public_id=value).first()
     if binding is not None and binding.entitlement_id is not None:

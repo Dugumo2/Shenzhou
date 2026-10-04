@@ -82,6 +82,30 @@ WORKSPACE_V2 = os.environ.get('PANEL_WORKSPACE_V2') == '1'
 SITE_BRAND = os.environ.get('PANEL_SITE_BRAND', '神舟云')[:60]
 FRONTEND_ENABLED = os.environ.get('PANEL_FRONTEND_ENABLED') == '1'
 CANDIDATE_DEMO_DATA = not PANEL_LIVE and os.environ.get('PANEL_CANDIDATE_DEMO_DATA') == '1'
+# 旧P8来源由部署清单显式开启；仅元数据，不在环境中保存真实订阅URL或令牌。
+P8_COMPAT_ENABLED = os.environ.get('PANEL_P8_COMPAT_ENABLED') == '1'
+P8_COMPAT_SOURCES = {}
+# 仅用于管理员展示经批准的脱敏核对资料，默认不读取任何本地快照。
+OBSERVATION_PATH = os.environ.get('PANEL_OBSERVATION_PATH', '')
+OBSERVATION_SHA256 = os.environ.get('PANEL_OBSERVATION_SHA256', '')
+if P8_COMPAT_ENABLED:
+    import json as _p8_json
+    try:
+        _p8_raw = os.environ.get('PANEL_P8_COMPAT_SOURCES_JSON', '[]')
+        if len(_p8_raw.encode('utf-8')) > 65536:
+            raise ValueError()
+        _p8_records = _p8_json.loads(_p8_raw)
+        if type(_p8_records) is not list or len(_p8_records) > 32:
+            raise ValueError()
+        for _p8_record in _p8_records:
+            if type(_p8_record) is not dict:
+                raise ValueError()
+            _p8_key = (_p8_record['source_instance'], _p8_record['source_id'])
+            if not all(type(value) is str for value in _p8_key) or _p8_key in P8_COMPAT_SOURCES:
+                raise ValueError()
+            P8_COMPAT_SOURCES[_p8_key] = _p8_record
+    except (ValueError, TypeError, KeyError):
+        raise ImproperlyConfigured('P8来源登记元数据格式无效；未开启兼容交付。') from None
 MONITOR_URL = os.environ.get('PANEL_MONITOR_URL', '')
 if MONITOR_URL:
     from urllib.parse import urlsplit
