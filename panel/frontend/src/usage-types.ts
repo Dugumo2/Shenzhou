@@ -1,10 +1,12 @@
 import { integerBytes, usagePercent } from './display.ts'
+import type { ProviderUsage } from './providerUsage'
 
 export type UsagePeriod = 'current' | '7d' | '30d'
 export type UsageBytes = string | null
 export interface UsageTotals { upload_bytes: UsageBytes; download_bytes: UsageBytes; charged_bytes: UsageBytes }
 export interface UsageDay extends UsageTotals { date: string; record_count: number }
 export interface UsageOverviewData {
+  provider_usage?: ProviderUsage
   service_id: string; source_type: 'entitlement' | 'membership' | 'p8'; time_zone: 'Asia/Shanghai'
   generated_at: string; period: UsagePeriod
   current_cycle: { starts_at: string; ends_at: string } | null

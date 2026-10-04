@@ -89,6 +89,23 @@ CANDIDATE_DEMO_DATA = not PANEL_LIVE and os.environ.get('PANEL_CANDIDATE_DEMO_DA
 # 旧P8来源由部署清单显式开启；仅元数据，不在环境中保存真实订阅URL或令牌。
 P8_COMPAT_ENABLED = os.environ.get('PANEL_P8_COMPAT_ENABLED') == '1'
 P8_COMPAT_SOURCES = {}
+# 只登记脱敏用量投影与唯一P8归属，面板不持有供应商API密钥。
+PROVIDER_USAGE_SOURCE = {}
+if os.environ.get('PANEL_PROVIDER_USAGE_SOURCE_JSON'):
+    import json as _provider_json
+    try:
+        _provider_raw = os.environ['PANEL_PROVIDER_USAGE_SOURCE_JSON']
+        if len(_provider_raw.encode('utf-8')) > 4096:
+            raise ValueError()
+        _provider_source = _provider_json.loads(_provider_raw)
+        if (type(_provider_source) is not dict
+                or set(_provider_source) != {'source_instance', 'source_id', 'path'}
+                or not all(type(value) is str and 0 < len(value) <= 1024 for value in _provider_source.values())
+                or not Path(_provider_source['path']).is_absolute()):
+            raise ValueError()
+        PROVIDER_USAGE_SOURCE = _provider_source
+    except (ValueError, TypeError, KeyError):
+        raise ImproperlyConfigured('统计来源登记无效。') from None
 # 仅用于管理员展示经批准的脱敏核对资料，默认不读取任何本地快照。
 OBSERVATION_PATH = os.environ.get('PANEL_OBSERVATION_PATH', '')
 OBSERVATION_SHA256 = os.environ.get('PANEL_OBSERVATION_SHA256', '')

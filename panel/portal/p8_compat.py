@@ -276,7 +276,7 @@ def _project(binding, *, detail=False):
         'quota_bytes': None, 'quota_state': 'unknown', 'used_bytes': None, 'raw_bytes': None,
         'remaining_bytes': None, 'next_reset_at': None, 'expires_at': None,
         'state': 'verification_required', 'enabled': True, 'business_state': 'verification_required',
-        'status_label': '资源待核验',
+        'status_label': '订阅已接入',
         'usage': {'quality': 'unknown', 'updated_at': None, 'message': '暂无可靠统计，当前用量和剩余待核算。'},
         'application': {'state': 'verification_required', 'desired_revision': None, 'applied_revision': None},
         'delivery': delivery,

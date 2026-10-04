@@ -4,6 +4,7 @@ import { request, errorMessage } from '../api'
 import { formatDate, formatGB, integerBytes } from '../display'
 import { reliableUsagePercent } from '../usage-types'
 import UsageDashboard from './UsageDashboard.vue'
+import ProviderUsageDashboard from './ProviderUsageDashboard.vue'
 import type { UsageOverviewData, UsagePeriod, UsageBytes } from '../usage-types'
 
 const props = defineProps<{ serviceId: string; refreshKey?: number; summaryOnly?: boolean }>()
@@ -35,10 +36,12 @@ function bytes(value: UsageBytes, unknown = '暂无可靠统计') {
 
 <template>
   <section class="surface usage-overview" :aria-labelledby="headingId" :aria-busy="busy">
-    <div class="section-title"><div><h2 :id="headingId">{{ summaryOnly ? '流量仪表盘' : '流量用量与统计图' }}</h2><p class="small muted">查看这份服务的额度占用与传输构成。</p></div><el-button :loading="busy" @click="load">刷新统计</el-button></div>
+    <div class="section-title"><div><h2 :id="headingId">{{ summaryOnly ? '流量仪表盘' : '流量用量与统计图' }}</h2><p class="small muted">{{ data?.provider_usage ? '查看已接入来源的用量和更新时间。' : '查看这份服务的额度占用与传输构成。' }}</p></div><el-button :loading="busy" @click="load">刷新统计</el-button></div>
     <el-alert v-if="error" :title="error" type="error" show-icon :closable="false" />
     <el-skeleton v-if="busy" :rows="4" animated />
     <template v-if="data">
+      <ProviderUsageDashboard v-if="data.provider_usage" :data="data.provider_usage" />
+      <template v-else>
       <div class="quality-line"><el-tag :type="data.quality.state === 'measured' ? 'success' : 'warning'">{{ qualityLabel }}</el-tag><span class="small muted">最后采集：{{ data.quality.collected_at ? formatDate(data.quality.collected_at) : '暂无采集记录' }}</span></div>
       <p class="quality-note">{{ data.quality.message }}</p>
       <div v-if="!summaryOnly" class="history-heading"><h3>统计范围</h3><el-radio-group v-model="period" aria-label="统计记录时间范围" :disabled="busy"><el-radio-button v-for="option in periods" :key="option.id" :value="option.id">{{ option.label }}</el-radio-button></el-radio-group></div>
@@ -57,6 +60,7 @@ function bytes(value: UsageBytes, unknown = '暂无可靠统计') {
       <p v-if="data.history.excluded_record_count" class="quality-note">另有 {{ data.history.excluded_record_count }} 条待核验记录，暂未计入汇总。</p>
       <p class="small muted">上传和下载显示原始传输量；套餐用量按当时的倍率折算，历史不会重新计算。1 GB = 1,000,000,000 字节。</p>
       </details>
+      </template>
     </template>
   </section>
 </template>

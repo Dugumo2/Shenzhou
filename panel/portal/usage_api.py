@@ -108,5 +108,14 @@ def service_usage(request, public_id):
     kind, record = result
     item = project(record, kind)
     if kind == 'p8' or item['state'] == 'mapping_required':
-        return success(unknown_usage(record.public_id, period, source_type=kind))
+        value = unknown_usage(record.public_id, period, source_type=kind)
+        # 供应商整机用量只向该已核P8的管理员本人展示，不当作个人套餐余额。
+        from django.conf import settings
+        source = getattr(settings, 'PROVIDER_USAGE_SOURCE', {})
+        if (kind == 'p8' and item['state'] != 'mapping_required' and request.user.is_staff
+                and source and record.source_instance == source['source_instance']
+                and record.source_id == source['source_id']):
+            from .provider_usage import read_provider_usage
+            value['provider_usage'] = read_provider_usage(source['path'])
+        return success(value)
     return success(_service(record, kind, period, timezone.now()))

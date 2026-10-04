@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import RuleSectionNav from '../components/RuleSectionNav.vue'
 import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { auth, hydrateSession } from '../auth'
 import { request, errorMessage } from '../api'
@@ -6,8 +7,9 @@ import { boundedRequest } from '../billingPending'
 import { capturePolicySave, moveComponent, submitPolicyPending, uncertainFailure, getPolicyPending, rememberPolicyPending, clearPolicyPending } from '../rulePolicies'
 import type { Binding, Candidate, Component, MatchExplanation, PolicyDetail, PolicyDraft, PolicyItem, PolicyOptions, PolicyPending } from '../rulePolicies'
 
+const isProduction=computed(()=>auth.session?.environment?.kind==='production')
 const verified=ref(false),identity=computed(()=>verified.value&&auth.session?.authenticated&&auth.session.user?.is_staff?auth.session.user.username:'')
-const listing=ref<PolicyItem[]>([]),options=ref<PolicyOptions|null>(null),detail=ref<PolicyDetail|null>(null)
+const listing=ref<PolicyItem[]>([]),options=ref<(PolicyOptions & {production_publish_available?:boolean;https_import_available?:boolean})|null>(null),detail=ref<PolicyDetail|null>(null)
 const loading=ref(false),busy=ref(false),error=ref(''),notice=ref(''),open=ref(false),editing=ref<PolicyItem|null>(null)
 const draft=reactive<PolicyDraft>({name:'',components:[],overrides:{}}),selectedComponent=ref('')
 const pending=computed(()=>identity.value?getPolicyPending(identity.value):null),domain=ref(''),match=ref<MatchExplanation|null>(null),candidate=ref<Candidate|null>(null)
@@ -37,7 +39,7 @@ async function show(item:PolicyItem,revision?:number){
   catch(e){if(token===detailGeneration&&own===identity.value)error.value=errorMessage(e)}
 }
 function begin(item:PolicyDetail|null=null){
-  if(locked.value)return
+  if(locked.value||readOnly.value)return
   editing.value=item?.item||null;draft.name=item?.item.name||''
   draft.components=JSON.parse(JSON.stringify(item?.version.document.components||[]));draft.overrides=JSON.parse(JSON.stringify(item?.version.document.overrides||{}))
   selectedComponent.value='';overrideTarget.value='';overrideReplacement.value='';open.value=true;error.value=''
@@ -95,27 +97,28 @@ onMounted(async()=>{try{await hydrateSession(true);verified.value=true}catch(e){
 onUnmounted(()=>{generation++;readGeneration++;detailGeneration++})
 </script>
 <template>
-  <div class="page-title"><div><p class="eyebrow">管理员工作区 · 代理规则</p><h1>规则方案</h1><p class="muted">选择固定来源与自建规则，核对顺序，再生成供发布器检查的材料。</p></div><el-button type="primary" :disabled="readOnly||locked" @click="begin()">新建方案</el-button></div>
-  <nav class="policy-navigation" aria-label="规则分区"><RouterLink to="/admin/rules">自建规则与命中</RouterLink><RouterLink to="/admin/rules/sources">规则来源</RouterLink><strong>规则方案</strong></nav>
+  <div class="page-title"><div><p class="eyebrow">管理员工作区 · 代理规则</p><h1>规则方案</h1><p class="muted">将来源与自建规则组成固定版本，查看顺序、覆盖和命中。</p></div><el-button v-if="options?.read_only===false" type="primary" :disabled="locked" @click="begin()">新建方案</el-button></div>
+  <RuleSectionNav active="policies" :read-only="options?.read_only" :production="isProduction" :publish-available="options?.production_publish_available" :https-available="options?.https_import_available" />
   <el-alert v-if="error" :title="error" type="error" :closable="false" class="spaced" />
   <el-alert v-if="notice" :title="notice" type="success" :closable="false" class="spaced" />
   <el-alert v-if="pending" title="上次保存结果尚未确认，请重试同一请求；当前输入已锁定。" type="warning" :closable="false"><el-button :loading="busy" @click="mutate(pending!)">重试原请求</el-button></el-alert>
   <section class="surface admin-panel">
     <p class="inline-note">方案版本会固定来源与自建条目；来源更新不会覆盖此版本。编译材料尚不代表发布成功，原链接和客户端保持原状态。</p>
     <el-button :loading="loading" :disabled="locked" @click="load">刷新方案和来源</el-button>
-    <el-table v-loading="loading" :data="listing" row-key="policy_id" empty-text="尚无组合方案；先导入来源或添加自建规则，再创建方案。"><el-table-column label="方案" prop="name" /><el-table-column label="版本" prop="revision" width="100" /><el-table-column label="操作"><template #default="{row}"><el-button text :disabled="locked" @click="show(row)">查看与检查</el-button></template></el-table-column></el-table>
+    <el-table v-loading="loading" :data="listing" row-key="policy_id" :empty-text="readOnly?'当前没有可查看的规则方案。':'尚无规则方案，可选择已有来源或自建规则创建。'"><el-table-column label="方案" prop="name" /><el-table-column label="版本" prop="revision" width="100" /><el-table-column label="操作"><template #default="{row}"><el-button text :disabled="locked" @click="show(row)">查看与检查</el-button></template></el-table-column></el-table>
   </section>
   <section v-if="detail" class="surface admin-panel spaced">
-    <div class="policy-toolbar"><h2>{{detail.item.name}} · v{{detail.version.revision}}</h2><el-select :model-value="detail.version.revision" aria-label="方案历史版本" :disabled="locked" @change="(revision:number)=>show(detail!.item,revision)"><el-option v-for="version in detail.history" :key="version.revision" :value="version.revision" :label="'v'+version.revision" /></el-select><el-button :disabled="readOnly||locked||detail.version.revision!==detail.item.revision" @click="begin(detail)">编辑为下一版本</el-button></div>
+    <div class="policy-toolbar"><h2>{{detail.item.name}} · v{{detail.version.revision}}</h2><el-select :model-value="detail.version.revision" aria-label="方案历史版本" :disabled="locked" @change="(revision:number)=>show(detail!.item,revision)"><el-option v-for="version in detail.history" :key="version.revision" :value="version.revision" :label="'v'+version.revision" /></el-select><el-button v-if="!readOnly" :disabled="locked||detail.version.revision!==detail.item.revision" @click="begin(detail)">编辑为下一版本</el-button></div>
     <el-table :data="detail.version.document.entries" max-height="400" empty-text="此方案无启用附加规则，默认仍走代理。"><el-table-column type="index" label="顺序" width="70" /><el-table-column prop="source_name" label="来源" min-width="120" /><el-table-column prop="rule.value" label="匹配内容" min-width="220" /><el-table-column label="动作"><template #default="{row}">{{actions[row.rule.action]}}</template></el-table-column><el-table-column label="状态"><template #default="{row}">{{row.enabled?'启用':row.overridden_by!==undefined?'显式覆盖/禁用':'停用'}}</template></el-table-column></el-table>
     <form class="policy-toolbar spaced" @submit.prevent="check"><el-input v-model="domain" placeholder="输入域名查看组合命中" aria-label="组合命中域名" maxlength="253" /><el-button native-type="submit" :loading="busy" :disabled="locked||!domain.trim()">检查当前版本</el-button></form>
     <div v-if="match" class="inline-note"><strong>{{actions[match.final_action]}} · {{match.reason}}</strong><p>这是方案v{{match.revision}}的解释，尚不代表客户端应用。</p><ol><li v-for="row in match.matches" :key="row.key">第{{row.order}}项 · {{row.source_name}} · {{actions[row.action]}} · {{row.enabled?'启用':row.overridden?'被覆盖':'停用'}}</li></ol></div>
-    <h3>绑定服务</h3><p class="small muted">使用同一份服务编号与来源，只绑定规则选择，不创建套餐或改变额度。</p>
+    <template v-if="!readOnly"><h3>绑定服务</h3><p class="small muted">使用同一份服务编号与来源，只绑定规则选择，不创建套餐或改变额度。</p>
     <form class="policy-toolbar" @submit.prevent="searchServices"><el-input v-model="serviceQuery" placeholder="搜索服务用户或编号" aria-label="搜索绑定服务" /><el-button native-type="submit" :disabled="locked||readOnly">查找服务</el-button></form>
     <div class="policy-toolbar spaced"><el-select v-model="selectedService" aria-label="选择绑定服务" :disabled="locked||readOnly" placeholder="选择已核对的服务"><el-option v-for="service in services" :key="service.source_type+'/'+service.id" :value="service.source_type+'/'+service.id" :label="(service.user?.username||'')+' · '+service.id+' · '+service.source_type" :disabled="service.state==='mapping_required'" /></el-select><el-button :disabled="locked||readOnly||!selectedService" @click="bind">绑定当前方案</el-button></div>
-    <h3>生成发布检查材料</h3><p class="small muted">现有P8生成器最多接受200条启用规则，并要求代理项在直连项之前。后台会拒绝不兼容顺序；生产发布需核对真实基础来源和唯一发布者。</p>
-    <div class="policy-toolbar"><el-select v-model="selectedBinding" aria-label="选择已绑定服务" :disabled="locked"><el-option v-for="binding in detail.bindings" :key="binding.binding_id" :value="binding.binding_id" :label="binding.service_source+' · '+binding.service_id" /></el-select><el-button :disabled="locked||readOnly||!chosenBinding||detail.version.revision!==detail.item.revision" :loading="busy" @click="compile">生成P8输入</el-button><el-button :disabled="locked||!chosenBinding?.current_candidate_id" @click="showCandidate">查看上次材料</el-button></div>
-    <div v-if="candidate" class="inline-note"><p>本地候选 #{{candidate.fence}} · 未生产发布</p><p class="small">材料摘要：{{candidate.sha256}}</p><el-collapse><el-collapse-item title="查看生成器输入与版本清单" name="artifact"><pre class="policy-json">{{JSON.stringify(candidate.artifact,null,2)}}</pre><pre class="policy-json">{{JSON.stringify(candidate.manifest,null,2)}}</pre></el-collapse-item></el-collapse></div>
+    </template>
+    <h3>发布检查材料</h3><p class="small muted">现有P8生成器最多接受200条启用规则，并要求代理项在直连项之前。后台会拒绝不兼容顺序；生产发布需核对真实基础来源和唯一发布者。</p>
+    <div class="policy-toolbar"><el-select v-model="selectedBinding" aria-label="选择已绑定服务" :disabled="locked"><el-option v-for="binding in detail.bindings" :key="binding.binding_id" :value="binding.binding_id" :label="binding.service_source+' · '+binding.service_id" /></el-select><el-button v-if="!readOnly" :disabled="locked||!chosenBinding||detail.version.revision!==detail.item.revision" :loading="busy" @click="compile">生成P8输入</el-button><el-button :disabled="locked||!chosenBinding?.current_candidate_id" @click="showCandidate">查看上次材料</el-button></div>
+    <div v-if="candidate" class="inline-note"><p>编译候选 #{{candidate.fence}} · 未生产发布</p><p class="small">材料摘要：{{candidate.sha256}}</p><el-collapse><el-collapse-item title="查看生成器输入与版本清单" name="artifact"><pre class="policy-json">{{JSON.stringify(candidate.artifact,null,2)}}</pre><pre class="policy-json">{{JSON.stringify(candidate.manifest,null,2)}}</pre></el-collapse-item></el-collapse></div>
   </section>
   <el-drawer :model-value="open" :title="editing?'编辑下一方案版本':'新建规则方案'" size="min(920px,100vw)" :close-on-click-modal="false" :show-close="!locked" :close-on-press-escape="!locked" @close="open=false">
     <el-form label-position="top" :disabled="locked"><el-form-item label="方案名称（可留空）"><el-input v-model="draft.name" maxlength="100" placeholder="默认规则方案" /></el-form-item>
@@ -132,5 +135,5 @@ onUnmounted(()=>{generation++;readGeneration++;detailGeneration++})
   </el-drawer>
 </template>
 <style scoped>
-.policy-navigation,.policy-toolbar{display:flex;gap:16px;align-items:center;flex-wrap:wrap}.policy-navigation{margin-bottom:20px}.policy-toolbar>.el-input,.policy-toolbar>.el-select{flex:1;min-width:240px}.policy-json{white-space:pre-wrap;overflow-wrap:anywhere;max-height:420px;overflow:auto}.policy-override{overflow-wrap:anywhere;margin:8px 0}.policy-toolbar h2{margin-right:auto}
+.policy-toolbar{display:flex;gap:16px;align-items:center;flex-wrap:wrap}.policy-toolbar>.el-input,.policy-toolbar>.el-select{flex:1;min-width:240px}.policy-json{white-space:pre-wrap;overflow-wrap:anywhere;max-height:420px;overflow:auto}.policy-override{overflow-wrap:anywhere;margin:8px 0}.policy-toolbar h2{margin-right:auto}
 </style>

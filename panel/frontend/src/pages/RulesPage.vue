@@ -1,10 +1,12 @@
 <script setup lang="ts">
+import RuleSectionNav from '../components/RuleSectionNav.vue'
 import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { ApiError, request, errorMessage } from '../api'
 import { auth, hydrateSession } from '../auth'
 import { boundedRequest } from '../billingPending'
 import { getRulePending, rememberRulePending, rulePendingKey, submitRulePending } from '../rulePending'
 import type { RuleSnapshot as Rule, RuleOperation as Pending } from '../rulePending'
+const isProduction=computed(()=>auth.session?.environment?.kind==='production')
 interface Source { id:string; name:string; rule_count:number|null; order_semantics:string }
 interface Rules { read_only:boolean; items:Rule[]; sources:Source[]; message:string; candidate_revision:string; limitations?:string[] }
 interface Conflict { rule_id:number; message:string }
@@ -119,26 +121,27 @@ onMounted(async()=>{try{await hydrateSession(true);sessionVerified.value=true;if
 onUnmounted(()=>{generation++;reads++;checks++})
 </script>
 <template>
-  <div class="page-title"><div><p class="eyebrow">管理员 · 规则管理</p><h1>代理规则</h1><p class="muted">编辑本地候选，检查域名覆盖和冲突。</p></div><div><el-button :loading="loading" @click="load">刷新列表</el-button><el-button type="primary" :disabled="!data||data.read_only||saving||!!pending" @click="openEditor()">添加规则</el-button></div></div>
+  <div class="page-title"><div><p class="eyebrow">管理员 · 规则管理</p><h1>代理规则</h1><p class="muted">查看自建规则，检查域名覆盖和冲突。</p></div><div><el-button :loading="loading" @click="load">刷新列表</el-button><el-button v-if="data&&!data.read_only" type="primary" :disabled="saving||!!pending" @click="openEditor()">添加规则</el-button></div></div>
+  <RuleSectionNav active="custom" :read-only="data?.read_only" :production="isProduction" />
   <el-alert v-if="error" :title="error" type="error" show-icon :closable="false" class="spaced" />
   <el-alert v-if="pending" title="上次规则操作仍待确认，重试会使用原请求和幂等键。可离开后返回本页；整页刷新或应用重启会丢失内存记录，请先确认结果。" type="warning" show-icon :closable="false" class="spaced" />
   <el-alert v-if="notice" :title="notice" type="success" show-icon class="spaced" @close="notice=''" />
   <el-skeleton v-if="loading&&!data" :rows="6" animated />
   <template v-if="data">
-    <el-alert :title="data.message" type="info" :closable="false" show-icon class="spaced" />
-    <nav class="spaced" aria-label="规则分区"><strong>自建规则与命中</strong> · <RouterLink to="/admin/rules/sources">规则来源：导入、查看版本</RouterLink> · <RouterLink to="/admin/rule-policies">规则方案：组合、绑定与检查</RouterLink></nav>
-    <section class="surface admin-panel"><h2>域名命中检查</h2><p class="muted small">这里检查当前自建候选。需要同时解释来源、覆盖和显式顺序，请进入规则方案，选择已保存版本检查；本处未命中时仍不能推断完整方案。</p>
+    <el-alert v-if="!isProduction&&!data.read_only" :title="data.message" type="info" :closable="false" show-icon class="spaced" />
+
+    <section class="surface admin-panel"><h2>域名命中检查</h2><p class="muted small">这里检查当前自建规则记录。需要同时解释来源、覆盖和显式顺序，请进入规则方案，选择已保存版本检查；本处未命中时仍不能推断完整方案。</p>
       <form class="rule-inspect" @submit.prevent="inspect"><el-input v-model="matchDomain" aria-label="检查域名" placeholder="例如 api.example.com" clearable /><el-button native-type="submit" :loading="matchBusy" :disabled="!matchDomain.trim()">检查匹配</el-button></form>
       <el-alert v-if="matchError" :title="matchError" type="error" :closable="false" class="spaced" />
-      <div v-if="match" class="inline-note"><strong>{{match.domain}}：{{match.result==='invalid_candidate'?'候选含无效规则，无法确定':match.final_action?actions[match.final_action]:'未命中自建规则，最终动作待确认'}}</strong><p>{{match.matched_id?'命中规则 #'+match.matched_id:match.source_id==='protected'?'命中内置保护校验':''}}</p><p class="small">{{match.order_semantics}}</p><p v-for="conflict in match.conflicts" :key="conflict.rule_id+conflict.message">{{conflict.message}}</p>
-        <p class="small">候选版本：{{match.candidate_revision.slice(0,12)}} · 来源：{{match.source_id==='protected'?'内置保护校验':match.source_id==='custom'?'数据库自建候选':'未命中已知候选来源'}}</p><p v-if="matchStale" class="small">匹配快照与当前列表版本不同，请刷新列表后重新检查。</p>
+      <div v-if="match" class="inline-note"><strong>{{match.domain}}：{{match.result==='invalid_candidate'?'记录含无效规则，无法确定':match.final_action?actions[match.final_action]:'未命中自建规则，最终动作待确认'}}</strong><p>{{match.matched_id?'命中规则 #'+match.matched_id:match.source_id==='protected'?'命中内置保护校验':''}}</p><p class="small">{{match.order_semantics}}</p><p v-for="conflict in match.conflicts" :key="conflict.rule_id+conflict.message">{{conflict.message}}</p>
+        <p class="small">记录版本：{{match.candidate_revision.slice(0,12)}} · 来源：{{match.source_id==='protected'?'内置保护校验':match.source_id==='custom'?'自建规则':'未命中已知来源'}}</p><p v-if="matchStale" class="small">匹配快照与当前列表版本不同，请刷新列表后重新检查。</p>
         <el-table v-if="match.related.length" :data="match.related"><el-table-column label="相关规则" prop="value" min-width="220" /><el-table-column label="动作"><template #default="{row}">{{actions[row.action]}}</template></el-table-column><el-table-column label="关系"><template #default="{row}">{{relations[row.relation]||row.relation}}</template></el-table-column><el-table-column label="域名匹配"><template #default="{row}">{{row.enabled?(row.matched?'匹配':'不匹配'):'已禁用，不参与命中'}}</template></el-table-column></el-table>
-        <p v-if="match.related_truncated" class="small">相关条目较多，仅展示部分。</p><p class="small muted">{{match.message}}</p>
+        <p v-if="match.related_truncated" class="small">相关条目较多，仅展示部分。</p><p class="small muted">{{isProduction?'此结果只解释当前记录，最终以发布版本和客户端应用结果为准。':match.message}}</p>
       </div>
     </section>
     <section class="surface admin-panel"><div class="section-title"><h2>自建规则</h2><el-input v-model="search" aria-label="搜索规则" placeholder="搜索域名或正则范围" clearable class="rule-search" /></div>
-      <p v-if="!data.items.length" class="inline-note">当前本地库没有自建规则；这不代表生产规则被删除。可添加候选进行验证。</p>
-      <div class="table-scroll"><el-table :data="filtered" row-key="id" empty-text="没有匹配规则"><el-table-column label="规则" min-width="230"><template #default="{row}"><strong>{{row.value||'无效条目，需修正'}}</strong><div v-if="row.scope_domain" class="small muted">范围：{{row.scope_domain}}</div></template></el-table-column><el-table-column label="类型" min-width="140"><template #default="{row}">{{kinds[row.kind]}}</template></el-table-column><el-table-column label="动作" min-width="120"><template #default="{row}">{{actions[row.action]}}</template></el-table-column><el-table-column label="启用" min-width="100"><template #default="{row}"><el-switch :model-value="row.enabled" :disabled="data.read_only||saving||!!pending||row.validation!=='valid'" :aria-label="'启停规则 '+row.value" @change="toggle(row)" /></template></el-table-column><el-table-column label="操作" min-width="160"><template #default="{row}"><el-button text :disabled="data.read_only||saving||!!pending" @click="openEditor(row)">编辑</el-button><el-button text type="danger" :disabled="data.read_only||saving||!!pending" @click="askDelete(row)">删除</el-button></template></el-table-column></el-table></div>
+      <p v-if="!data.items.length" class="inline-note">{{data.read_only?'当前没有可显示的自建规则。':'当前没有自建规则，可以添加后检查匹配。'}}</p>
+      <div class="table-scroll"><el-table :data="filtered" row-key="id" empty-text="没有匹配规则"><el-table-column label="规则" min-width="230"><template #default="{row}"><strong>{{row.value||'无效条目，需修正'}}</strong><div v-if="row.scope_domain" class="small muted">范围：{{row.scope_domain}}</div></template></el-table-column><el-table-column label="类型" min-width="140"><template #default="{row}">{{kinds[row.kind]}}</template></el-table-column><el-table-column label="动作" min-width="120"><template #default="{row}">{{actions[row.action]}}</template></el-table-column><el-table-column label="启用" min-width="100"><template #default="{row}"><span v-if="data.read_only">{{row.enabled?'启用':'停用'}}</span><el-switch v-else :model-value="row.enabled" :disabled="data.read_only||saving||!!pending||row.validation!=='valid'" :aria-label="'启停规则 '+row.value" @change="toggle(row)" /></template></el-table-column><el-table-column v-if="!data.read_only" label="操作" min-width="160"><template #default="{row}"><el-button text :disabled="data.read_only||saving||!!pending" @click="openEditor(row)">编辑</el-button><el-button text type="danger" :disabled="data.read_only||saving||!!pending" @click="askDelete(row)">删除</el-button></template></el-table-column></el-table></div>
     </section>
     <el-collapse class="spaced"><el-collapse-item title="规则来源与当前支持范围" name="sources"><div v-for="source in data.sources" :key="source.id" class="inline-note"><strong>{{source.name}}</strong> · {{source.rule_count===null?'未接入':source.rule_count+' 条'}}<p>{{source.order_semantics}}</p></div><p v-for="item in data.limitations" :key="item" class="small muted">{{item}}</p></el-collapse-item></el-collapse>
   </template>

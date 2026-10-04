@@ -1,10 +1,12 @@
 <script setup lang="ts">
+import RuleSectionNav from '../components/RuleSectionNav.vue'
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { auth, hydrateSession } from '../auth'
 import { request, errorMessage } from '../api'
 import { boundedRequest } from '../billingPending'
 import { useSourceImport, type RuleSource, type SourceRule } from '../sourceImport'
 import type { Pagination } from '../types'
+const isProduction=computed(()=>auth.session?.environment?.kind==='production')
 interface Listing { items:RuleSource[]; pagination:Pagination; read_only:boolean; message:string }
 interface Detail { item:RuleSource; version:{revision:number;sha256:string;count:number}; history:{revision:number;count:number;created_at:string}[]; history_truncated:boolean; items:SourceRule[]; pagination:Pagination }
 const verified=ref(false),identity=computed(()=>verified.value&&auth.session?.authenticated&&auth.session.user?.is_staff?auth.session.user.username:'')
@@ -41,8 +43,8 @@ onMounted(async()=>{try{await hydrateSession(true);verified.value=true}catch(e){
 onUnmounted(()=>{reads++;details++;editor.dispose()})
 </script>
 <template>
-  <div class="page-title"><div><p class="eyebrow">管理员工作区 · 代理规则</p><h1>规则来源</h1><p class="muted">导入一份来源，先核对差异，再保存独立版本。</p></div><el-button type="primary" :disabled="!listing||listing.read_only||!!outstanding||busy" @click="editor.begin()">导入规则文件</el-button></div>
-  <nav class="source-navigation" aria-label="规则分区"><RouterLink to="/admin/rules">自建规则与命中</RouterLink><strong>规则来源</strong><RouterLink to="/admin/rule-policies">规则方案</RouterLink></nav>
+  <div class="page-title"><div><p class="eyebrow">管理员工作区 · 代理规则</p><h1>规则来源</h1><p class="muted">查看来源内容及版本变化，供规则方案选用。</p></div><el-button v-if="listing&&!listing.read_only" type="primary" :disabled="!!outstanding||busy" @click="editor.begin()">导入规则文件</el-button></div>
+  <RuleSectionNav active="sources" :read-only="listing?.read_only" :production="isProduction" />
   <el-alert v-if="notice" :title="notice" type="success" :closable="false" class="spaced" />
   <el-alert v-if="outstanding&&!open" title="上次保存结果尚未确认。" type="warning" :closable="false"><el-button @click="open=true">继续确认</el-button></el-alert>
   <section class="surface admin-panel">
@@ -53,7 +55,7 @@ onUnmounted(()=>{reads++;details++;editor.dispose()})
       <el-table-column label="来源" min-width="200"><template #default="{row}"><el-button link type="primary" @click="showDetail(row)">{{row.name}}</el-button></template></el-table-column>
       <el-table-column label="当前版本" width="100"><template #default="{row}">v{{row.revision}}</template></el-table-column><el-table-column label="规则数" prop="count" width="100" />
       <el-table-column label="状态" min-width="150"><template #default><el-tag type="info">待组合候选</el-tag></template></el-table-column>
-      <el-table-column label="操作" min-width="200"><template #default="{row}"><el-button text @click="showDetail(row)">查看版本</el-button><el-button text :disabled="listing?.read_only||!!outstanding||busy" @click="editor.begin(row)">更新文件</el-button></template></el-table-column>
+      <el-table-column label="操作" min-width="200"><template #default="{row}"><el-button text @click="showDetail(row)">查看版本</el-button><el-button v-if="!listing?.read_only" text :disabled="!!outstanding||busy" @click="editor.begin(row)">更新文件</el-button></template></el-table-column>
     </el-table>
     <el-pagination v-if="listing&&listing.pagination.pages>1" v-model:current-page="page" :page-size="25" :total="listing.pagination.total" layout="prev, pager, next" @current-change="load" />
   </section>
@@ -89,5 +91,5 @@ onUnmounted(()=>{reads++;details++;editor.dispose()})
   </el-drawer>
 </template>
 <style scoped>
-.source-navigation{display:flex;gap:24px;margin:0 0 20px}.source-example{white-space:pre-wrap;overflow-wrap:anywhere;background:#f4f6fa;padding:14px;border-radius:8px}.source-preview{margin-top:24px}.source-preview li{margin:8px 0}.source-preview h3{font-size:16px}input[type=file]{max-width:100%}
+.source-example{white-space:pre-wrap;overflow-wrap:anywhere;background:#f4f6fa;padding:14px;border-radius:8px}.source-preview{margin-top:24px}.source-preview li{margin:8px 0}.source-preview h3{font-size:16px}input[type=file]{max-width:100%}
 </style>

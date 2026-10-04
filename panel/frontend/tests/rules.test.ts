@@ -69,7 +69,7 @@ function mount(send:(path:string,method?:string,body?:any)=>Promise<unknown>,use
   const hydrateSession=async()=>{const user=verify?await verify():{username,is_staff:true};auth.session={authenticated:!!user,user};auth.ready=true}
   const exports:Record<string,any>={}
   const moduleRequire=(name:string)=>name==='vue'?{...vue,onMounted:(fn:()=>Promise<void>)=>starts.push(fn),onUnmounted:(fn:()=>void)=>ends.push(fn)}:
-    name==='../api'?{...api,request:send}:name==='../auth'?{auth,hydrateSession}:name==='../billingPending'?billing:name==='../rulePending'?pending:require(name)
+    name==='../api'?{...api,request:send}:name==='../auth'?{auth,hydrateSession}:name==='../billingPending'?billing:name==='../rulePending'?pending:name.endsWith('.vue')?{default:name}:require(name)
   new Function('require','exports',js)(moduleRequire,exports)
   const state=scope.run(()=>exports.default.setup({},{expose:()=>{}}))
   const ready=Promise.all(starts.map(fn=>fn())).then(flush)
