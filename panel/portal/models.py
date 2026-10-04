@@ -101,6 +101,8 @@ class ClientDirectRule(models.Model):
 class Server(models.Model):
     public_id = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
     name = models.CharField(max_length=100)
+    notes = models.TextField(blank=True, default='', max_length=1000)
+    revision = models.PositiveIntegerField(default=1)
     enabled = models.BooleanField(default=True)
     adapter = models.CharField(max_length=40, default='unconfigured')
     last_seen_at = models.DateTimeField(null=True, blank=True)
@@ -133,6 +135,8 @@ class Egress(models.Model):
 class Line(models.Model):
     public_id = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
     name = models.CharField(max_length=100)
+    notes = models.TextField(blank=True, default='', max_length=1000)
+    revision = models.PositiveIntegerField(default=1)
     ingress = models.ForeignKey(Ingress, on_delete=models.PROTECT, related_name='lines')
     additional_ingresses = models.ManyToManyField(Ingress, blank=True, related_name='additional_lines')
     egress = models.ForeignKey(Egress, on_delete=models.PROTECT, related_name='lines')
@@ -143,6 +147,86 @@ class Line(models.Model):
 
     def all_ingresses(self):
         return [self.ingress] + list(self.additional_ingresses.exclude(pk=self.ingress_id).order_by('pk'))
+
+
+class CoreInstance(models.Model):
+    """核心登记，不承担安装、配置发布或运行控制。"""
+    public_id = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
+    server = models.ForeignKey(Server, on_delete=models.PROTECT, related_name='cores')
+    instance_key = models.SlugField(max_length=80)
+    name = models.CharField(max_length=100)
+    core_type = models.CharField(max_length=24, choices=[('xray', 'Xray'), ('sing_box', 'sing-box'), ('other', '其他')])
+    registered_version = models.CharField(max_length=80, null=True, blank=True)
+    configuration_owner = models.CharField(max_length=100)
+    configuration_version = models.CharField(max_length=80, blank=True, default='')
+    notes = models.TextField(blank=True, default='', max_length=1000)
+    revision = models.PositiveIntegerField(default=1)
+    ingresses = models.ManyToManyField(Ingress, blank=True, related_name='core_instances')
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=['server', 'instance_key'], name='unique_core_instance_key')]
+
+
+class InventoryMutationReceipt(models.Model):
+    """以数据库唯一键保护资料修改重试，不复用审计事件猜测成功。"""
+    actor = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
+    key = models.CharField(max_length=100)
+    fingerprint = models.CharField(max_length=64)
+    response = models.JSONField(default=dict)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=['actor', 'key'], name='unique_inventory_mutation_key')]
+
+
+class ServerObservation(models.Model):
+    """受信采集器产生的不可覆盖样本；数值缺失保留 null。"""
+    server = models.ForeignKey(Server, on_delete=models.PROTECT, related_name='observations')
+    source = models.CharField(max_length=80)
+    event_id = models.CharField(max_length=100)
+    observed_at = models.DateTimeField()
+    expires_at = models.DateTimeField()
+    target_fingerprint = models.CharField(max_length=64)
+    metrics = models.JSONField(default=dict)
+    received_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=['source', 'event_id'], name='unique_server_observation_event'),
+                       models.CheckConstraint(condition=models.Q(expires_at__gt=models.F('observed_at')), name='server_observation_validity')]
+        indexes = [models.Index(fields=['server', '-observed_at'], name='server_observation_latest')]
+
+
+class CheckResult(models.Model):
+    """固定目标的独立检测回执；单端点成功不提升整条线路状态。"""
+    server = models.ForeignKey(Server, null=True, blank=True, on_delete=models.PROTECT, related_name='checks')
+    line = models.ForeignKey(Line, null=True, blank=True, on_delete=models.PROTECT, related_name='checks')
+    core = models.ForeignKey(CoreInstance, null=True, blank=True, on_delete=models.PROTECT, related_name='checks')
+    ingress = models.ForeignKey(Ingress, null=True, blank=True, on_delete=models.PROTECT, related_name='checks')
+    egress = models.ForeignKey(Egress, null=True, blank=True, on_delete=models.PROTECT, related_name='checks')
+    source = models.CharField(max_length=80)
+    event_id = models.CharField(max_length=100)
+    check_kind = models.CharField(max_length=24)
+    observed_at = models.DateTimeField()
+    expires_at = models.DateTimeField()
+    target_fingerprint = models.CharField(max_length=64)
+    result = models.CharField(max_length=12, choices=[('pass', '通过'), ('fail', '失败'), ('timeout', '超时'), ('unknown', '未知')])
+    latency_ms = models.FloatField(null=True, blank=True)
+    error_stage = models.CharField(max_length=24, blank=True, default='')
+    error_code = models.CharField(max_length=40, blank=True, default='')
+    received_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=['source', 'event_id'], name='unique_inventory_check_event'),
+                       models.CheckConstraint(condition=models.Q(expires_at__gt=models.F('observed_at')), name='inventory_check_validity'),
+                       models.CheckConstraint(condition=(
+                           models.Q(server__isnull=False, line__isnull=True, core__isnull=True, ingress__isnull=True, egress__isnull=True)
+                           | models.Q(server__isnull=True, line__isnull=False, core__isnull=True, ingress__isnull=True, egress__isnull=True)
+                           | models.Q(server__isnull=True, line__isnull=True, core__isnull=False, ingress__isnull=True, egress__isnull=True)
+                           | models.Q(server__isnull=True, line__isnull=True, core__isnull=True, ingress__isnull=False, egress__isnull=True)
+                           | models.Q(server__isnull=True, line__isnull=True, core__isnull=True, ingress__isnull=True, egress__isnull=False)
+                       ), name='inventory_check_one_target')]
+        indexes = [models.Index(fields=['line', '-observed_at'], name='line_check_latest'),
+                   models.Index(fields=['server', '-observed_at'], name='server_check_latest')]
 
 
 class Entitlement(models.Model):
@@ -580,3 +664,6 @@ class P8SourceBinding(models.Model):
             models.CheckConstraint(condition=models.Q(state__in=['unverified', 'verified', 'revoked']),
                                    name='p8_binding_known_state'),
         ]
+
+# 规则组合使用独立模块；与资源观测迁移分离，统一由portal注册。
+from .rule_policy_models import RulePolicy, RulePolicyVersion, RulePolicyBinding, RulePolicyCandidate

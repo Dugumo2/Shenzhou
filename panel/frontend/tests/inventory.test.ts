@@ -7,6 +7,7 @@ import ts from 'typescript'
 import * as vue from 'vue'
 import * as api from '../src/api.ts'
 import * as display from '../src/display.ts'
+import { effectiveFreshness } from '../src/inventoryStatus.ts'
 
 function deferred<T>() {
   let resolve!:(value:T)=>void, reject!:(reason:unknown)=>void
@@ -31,7 +32,8 @@ function mount(kind:'servers'|'lines',send:(path:string,method?:string)=>Promise
   const router={replace:async(next:{path:string;query:Record<string,string>})=>{replacements.push(next);route.query=next.query}}
   const exports:Record<string,any>={}
   const moduleRequire=(name:string)=>name==='vue'?{...vue,onUnmounted:(fn:()=>void)=>ends.push(fn)}:
-    name==='vue-router'?{useRoute:()=>route,useRouter:()=>router}:name==='../api'?{...api,request:send}:name==='../display'?display:require(name)
+    name==='vue-router'?{useRoute:()=>route,useRouter:()=>router}:name==='../api'?{...api,request:send}:name==='../display'?display:
+      name==='../inventoryStatus'?{effectiveFreshness,useInventoryClock:()=>vue.ref(Date.now())}:name.endsWith('.vue')?{}:require(name)
   new Function('require','exports',scripts[kind==='servers'?0:1])(moduleRequire,exports)
   const state=scope.run(()=>exports.default.setup({},{expose:()=>{}}))
   return {state,route,replacements,ready:flush(),unmount(){ends.forEach(fn=>fn());scope.stop()}}
@@ -139,7 +141,8 @@ test('空列表与请求失败保留准确状态，详情错误可重试',async(
 
 test('模板明确登记与监控的范围，未提供伪造探针或绿色健康状态',()=>{
   const servers=sources[0].template!.content,lines=sources[1].template!.content
-  assert.ok(servers.includes('最后记录'));assert.ok(servers.includes('未接入监控'));assert.ok(servers.includes('暂无可信样本'))
+  const observation=readFileSync(new URL('../src/components/ServerObservationView.vue',import.meta.url),'utf8')
+  assert.ok(servers.includes('最后记录'));assert.ok(observation.includes('未接入监控'));assert.ok(observation.includes('暂无可信样本'))
   assert.ok(lines.includes('入口服务器 / 协议'));assert.ok(lines.includes('出口服务器 / 类型'));assert.ok(lines.includes('完整上下游编排'))
   for(const template of [servers,lines]){
     assert.ok(template.includes('登记启用'))

@@ -7,6 +7,7 @@ from . import rule_api, usage_api, candidate_delivery
 from . import inventory_api, rule_source_api
 from . import p8_compat_api
 from . import observation_api
+from . import rule_policy_api
 
 
 app_name = 'api'
@@ -35,6 +36,13 @@ urlpatterns = [
     path('admin/rule-sources/preview', rule_source_api.preview, name='rule_source_preview'),
     path('admin/rule-sources/commit', rule_source_api.commit, name='rule_source_commit'),
     path('admin/rule-sources/<str:source_id>', rule_source_api.source_detail, name='rule_source_detail'),
+    path('admin/rule-policies', rule_policy_api.collection, name='rule_policies'),
+    path('admin/rule-policies/options', rule_policy_api.options, name='rule_policy_options'),
+    path('admin/rule-policies/<uuid:policy_id>', rule_policy_api.detail, name='rule_policy_detail'),
+    path('admin/rule-policies/<uuid:policy_id>/preview', rule_policy_api.preview, name='rule_policy_preview'),
+    path('admin/rule-policies/<uuid:policy_id>/bind', rule_policy_api.bind, name='rule_policy_bind'),
+    path('admin/rule-policies/<uuid:policy_id>/compile', rule_policy_api.compile, name='rule_policy_compile'),
+    path('admin/rule-policies/<uuid:policy_id>/candidates/<uuid:candidate_id>', rule_policy_api.candidate, name='rule_policy_candidate'),
     path('admin/servers', inventory_api.servers, name='inventory_servers'),
     path('admin/servers/<str:public_id>', inventory_api.server_detail, name='inventory_server_detail'),
     path('admin/lines', inventory_api.lines, name='inventory_lines'),

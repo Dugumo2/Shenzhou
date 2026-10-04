@@ -126,8 +126,8 @@ onUnmounted(()=>{generation++;reads++;checks++})
   <el-skeleton v-if="loading&&!data" :rows="6" animated />
   <template v-if="data">
     <el-alert :title="data.message" type="info" :closable="false" show-icon class="spaced" />
-    <nav class="spaced" aria-label="规则分区"><strong>自建规则与命中</strong> · <RouterLink to="/admin/rules/sources">规则来源：导入、查看版本</RouterLink></nav>
-    <section class="surface admin-panel"><h2>域名命中检查</h2><p class="muted small">查看当前自建候选的命中项和相关父子域。导入的来源尚未组合，不参与本处匹配；未命中时的最终动作仍待确认。</p>
+    <nav class="spaced" aria-label="规则分区"><strong>自建规则与命中</strong> · <RouterLink to="/admin/rules/sources">规则来源：导入、查看版本</RouterLink> · <RouterLink to="/admin/rule-policies">规则方案：组合、绑定与检查</RouterLink></nav>
+    <section class="surface admin-panel"><h2>域名命中检查</h2><p class="muted small">这里检查当前自建候选。需要同时解释来源、覆盖和显式顺序，请进入规则方案，选择已保存版本检查；本处未命中时仍不能推断完整方案。</p>
       <form class="rule-inspect" @submit.prevent="inspect"><el-input v-model="matchDomain" aria-label="检查域名" placeholder="例如 api.example.com" clearable /><el-button native-type="submit" :loading="matchBusy" :disabled="!matchDomain.trim()">检查匹配</el-button></form>
       <el-alert v-if="matchError" :title="matchError" type="error" :closable="false" class="spaced" />
       <div v-if="match" class="inline-note"><strong>{{match.domain}}：{{match.result==='invalid_candidate'?'候选含无效规则，无法确定':match.final_action?actions[match.final_action]:'未命中自建规则，最终动作待确认'}}</strong><p>{{match.matched_id?'命中规则 #'+match.matched_id:match.source_id==='protected'?'命中内置保护校验':''}}</p><p class="small">{{match.order_semantics}}</p><p v-for="conflict in match.conflicts" :key="conflict.rule_id+conflict.message">{{conflict.message}}</p>

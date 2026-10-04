@@ -42,11 +42,11 @@ onUnmounted(()=>{reads++;details++;editor.dispose()})
 </script>
 <template>
   <div class="page-title"><div><p class="eyebrow">管理员工作区 · 代理规则</p><h1>规则来源</h1><p class="muted">导入一份来源，先核对差异，再保存独立版本。</p></div><el-button type="primary" :disabled="!listing||listing.read_only||!!outstanding||busy" @click="editor.begin()">导入规则文件</el-button></div>
-  <nav class="source-navigation" aria-label="规则分区"><RouterLink to="/admin/rules">自建规则与命中</RouterLink><strong>规则来源</strong></nav>
+  <nav class="source-navigation" aria-label="规则分区"><RouterLink to="/admin/rules">自建规则与命中</RouterLink><strong>规则来源</strong><RouterLink to="/admin/rule-policies">规则方案</RouterLink></nav>
   <el-alert v-if="notice" :title="notice" type="success" :closable="false" class="spaced" />
   <el-alert v-if="outstanding&&!open" title="上次保存结果尚未确认。" type="warning" :closable="false"><el-button @click="open=true">继续确认</el-button></el-alert>
   <section class="surface admin-panel">
-    <p class="inline-note">来源与自建规则分别保留。这里保存的版本尚未加入组合方案，不会改变当前域名命中、服务器或客户端；覆盖、顺序与方案绑定将继续接入。</p>
+    <p class="inline-note">来源与自建规则分别保留。保存新版本不会自动改动已有方案；请在规则方案中选择明确版本、核对覆盖与顺序，再生成发布检查材料。服务器与客户端不会因本页保存而改变。</p>
     <form class="table-filters" @submit.prevent="search"><el-input v-model="q" aria-label="搜索来源" placeholder="搜索来源名称" maxlength="100" clearable /><el-button native-type="submit" :loading="loading">搜索</el-button><el-button :loading="loading" @click="load">刷新</el-button></form>
     <el-alert v-if="error" :title="error" type="error" :closable="false" />
     <el-table v-else v-loading="loading" :data="listing?.items||[]" row-key="source_id" empty-text="尚未导入规则来源；原有自建规则仍在另一个分区。">

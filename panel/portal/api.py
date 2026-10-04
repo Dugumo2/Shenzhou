@@ -131,63 +131,26 @@ def logout(request):
 
 @endpoint()
 def my_services(request):
-    from . import p8_compat
-    record = service_queryset().filter(user=request.user).first()
-    claimed = set(p8_compat.claimed_membership_ids(request.user))
-    bound = set(p8_compat.bound_membership_ids(request.user))
-    legacy = visible_legacy_services().select_related('user').filter(user=request.user).exclude(pk__in=bound).first()
-    items = [project_service(record, 'entitlement')] if record else []
-    if legacy is not None:
-        item = project_service(legacy, 'membership')
-        items.append(unresolved_p8_service(item) if legacy.pk in claimed else item)
-    items.extend(p8_compat.list_services(request.user))
-    compatibility = compatibility_for(request.user.pk, record is not None)
-    if claimed - bound:
-        compatibility = {'state': 'mapping_required', 'message': '部分服务资料需要管理员重新核对，暂不提供资源。'}
+    from .service_projection import owner_compatibility, project_index, service_index
+    items = project_index(service_index(request.user))
     return success({'items': items, 'service_count': len(items),
-                    'compatibility': compatibility})
+                    'compatibility': owner_compatibility(request.user)})
 
 
 def unresolved_p8_service(item):
-    """显式来源关联失效时，不回退展示未应用的会员额度或旧交付入口。"""
-    for key in ('quota_bytes', 'used_bytes', 'raw_bytes', 'remaining_bytes', 'next_reset_at', 'expires_at'):
-        item[key] = None
-    item.update(state='mapping_required', business_state='mapping_required', enabled=False,
-                status_label='资料待核对', quota_state='unknown')
-    item['usage'] = {'quality': 'unknown', 'updated_at': None, 'message': '来源关联需要重新核对，当前额度与用量暂不可确认。'}
-    item['delivery'] = {'state': 'blocked', 'message': '请联系管理员核对服务资料。', 'download_url': None}
-    item['actions'] = {key: False for key in ('billing', 'quota', 'renew', 'grants', 'enable', 'reset')}
-    item['compatibility'] = {'state': 'mapping_required', 'message': '来源关联需要重新核对。'}
-    for client in item.get('clients', []):
-        client['delivery'] = dict(item['delivery'])
-    return item
+    # 保留内部调用兼容，状态转换只维护一个实现。
+    from .service_projection import unresolved
+    return unresolved(item)
 
 
 @endpoint()
 def my_service_detail(request, public_id):
-    from . import p8_compat
-    try:
-        value = uuid.UUID(public_id)
-    except (ValueError, TypeError, AttributeError):
+    from .service_projection import project, resolve
+    result = resolve(request.user, public_id)
+    if result is None:
         return error('not_found', '服务不存在或不可访问。', 404)
-    record = service_queryset().filter(user=request.user, public_id=value).first()
-    if record is not None:
-        return success(project_service(record, 'entitlement', detail=True))
-    existing = p8_compat.service_detail(request.user, value)
-    if existing is not None:
-        return success(existing)
-    claimed = p8_compat.claimed_membership_ids(request.user)
-    disputed = legacy_services().filter(user=request.user, public_id=value, pk__in=claimed).first()
-    if disputed is not None:
-        return success(unresolved_p8_service(project_service(disputed, 'membership', detail=True)))
-    # 已核验合并的旧UUID指向同一目标投影，未核验或坏绑定不能通过详情绕过列表。
-    binding = verified_legacy_bindings().filter(owner=request.user, membership__public_id=value).first()
-    if binding is not None and binding.entitlement_id is not None:
-        return success(project_service(binding.entitlement, 'entitlement', detail=True))
-    legacy = visible_legacy_services().select_related('user').filter(user=request.user, public_id=value).first()
-    if legacy is None:
-        return error('not_found', '服务不存在或不可访问。', 404)
-    return success(project_service(legacy, 'membership', detail=True))
+    kind, record = result
+    return success(project(record, kind, detail=True))
 
 
 @endpoint()
@@ -217,75 +180,26 @@ def page_options(request):
 
 @endpoint(staff=True)
 def admin_services(request):
+    from .service_projection import project_index, service_index
     options, failure = page_options(request)
     if failure is not None:
         return failure
     q, state = request.GET.get('q', '').strip(), request.GET.get('state', 'all')
     states = {'all', 'pending', 'active', 'simulated', 'disabled', 'suspended', 'enforcement_pending',
-              'suspension_pending', 'resuming', 'disabling', 'resetting', 'failed', 'blocked', 'expired', 'metering_gap'}
+              'suspension_pending', 'resuming', 'disabling', 'resetting', 'failed', 'blocked', 'expired',
+              'metering_gap', 'mapping_required', 'verification_required', 'exhausted', 'account_disabled'}
     if len(q) > 150 or state not in states:
         return error('invalid_filter', '搜索或状态筛选无效。', 422)
-    now = timezone.now()
-    entitlements = service_queryset()
-    memberships = visible_legacy_services()
-    if q:
-        search = Q(user__username__icontains=q) | Q(public_id__icontains=q.replace('-', ''))
-        old_targets = verified_legacy_bindings().filter(
-            membership__public_id__icontains=q.replace('-', '')).values('entitlement_id')
-        entitlements, memberships = entitlements.filter(search | Q(pk__in=old_targets)), memberships.filter(search)
-    if state == 'expired':
-        entitlements, memberships = entitlements.filter(expires_at__lte=now), memberships.filter(expires_at__lte=now)
-    elif state == 'active':
-        # “已应用”不能包含停用、到期、旧修订或尚无可靠当前期统计的服务。
-        # 先在数据库缩小候选，再复用读投影的计量质量判断；应用成功不是核心能力验收。
-        exhausted_cycle = BillingCycle.objects.filter(
-            entitlement_id=OuterRef('pk'), starts_at__lte=now, ends_at__gt=now,
-            used_bytes__gte=OuterRef('applied_snapshot__quota_bytes'))
-        candidates = entitlements.filter(
-            state='active', enabled=True, user__is_active=True, expires_at__gt=now,
-            applied_revision=F('revision'), applied_revision__gt=0,
-        ).annotate(known_exhausted=Exists(exhausted_cycle)).filter(known_exhausted=False)
-        entitlements = entitlements.filter(pk__in=matching_service_ids(candidates, 'entitlement', 'active', now))
-        # 旧共享身份计量未核验，不能借另一份权益的统计证明有效。
-        memberships = memberships.none()
-    elif state == 'metering_gap':
-        entitlements = entitlements.filter(
-            pk__in=matching_service_ids(entitlements, 'entitlement', 'metering_gap', now))
-        memberships = memberships.none()
-    elif state == 'disabled':
-        entitlements = entitlements.filter(Q(enabled=False) | Q(state='disabled'))
-        memberships = memberships.none()
-    elif state != 'all':
-        entitlements, memberships = entitlements.filter(state=state), memberships.filter(status=state)
-    # 只分页公开标识索引，再读取当前页对象，不把全部用户和私有身份送进内存。
-    def index(query, source):
-        return query.order_by().annotate(sort_name=F('user__username'),
-            source_type=Value(source, output_field=CharField())).values('pk', 'public_id', 'sort_name', 'source_type')
-    rows = index(entitlements, 'entitlement').union(index(memberships, 'membership')).order_by(
-        'sort_name', 'public_id', 'source_type')
-    paginator = Paginator(rows, options[1])
+    paginator = Paginator(service_index(q=q, state=state), options[1])
     try:
         page = paginator.page(options[0])
     except EmptyPage:
         return error('page_not_found', '此页不存在，请返回前一页。', 404)
-    current = list(page.object_list)
-    records = {('entitlement', row.pk): row for row in service_queryset().filter(
-        pk__in=[value['pk'] for value in current if value['source_type'] == 'entitlement'])}
-    records.update({('membership', row.pk): row for row in visible_legacy_services().select_related('user').filter(
-        pk__in=[value['pk'] for value in current if value['source_type'] == 'membership'])})
-    items = []
-    for row in current:
-        record = records.get((row['source_type'], row['pk']))
-        if record is None:
-            # 索引分页后绑定被撤销时关闭该行，不能从旧索引恢复已失效服务。
-            continue
-        value = project_service(record, row['source_type'], now=now, administrator=True)
-        value['user'] = {'username': record.user.get_username()}
-        value['compatibility'] = compatibility_for(record.user_id, row['source_type'] == 'entitlement')
-        items.append(value)
+    items = project_index(page.object_list, administrator=True)
     return success({'items': items, 'pagination': {'page': page.number, 'page_size': options[1],
                     'total': paginator.count, 'pages': paginator.num_pages,
-                    'has_next': page.has_next(), 'has_previous': page.has_previous()}, 'filters': {'q': q, 'state': state}})
+                    'has_next': page.has_next(), 'has_previous': page.has_previous()},
+                    'filters': {'q': q, 'state': state}})
 
 
 @endpoint(staff=True)

@@ -12,6 +12,8 @@ export interface Service {
   id: string; name: string; quota_bytes: Bytes; used_bytes: Bytes; raw_bytes: Bytes
   remaining_bytes: Bytes; next_reset_at: string | null; expires_at: string | null
   state: string; enabled: boolean; status_label: string; source_type: 'entitlement' | 'membership' | 'p8'
+  capabilities?: { billing: boolean; quota: boolean; renew: boolean; grants: boolean; enable: boolean; reset: boolean; p8_delivery: boolean }
+  operation_targets?: { billing: string | null; p8_delivery: string | null }
   business_state?: string; quota_state?: 'applied' | 'configured' | 'unknown'
   usage: { quality: string; updated_at: string | null; message: string }
   delivery: Delivery

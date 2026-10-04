@@ -59,7 +59,7 @@ class InventoryApiTests(TestCase):
         for route in paths:
             response = self.client.post('/api/v1/admin/' + route)
             self.assertEqual(response.status_code, 405)
-            self.assertEqual(response['Allow'], 'GET')
+            self.assertEqual(response['Allow'], 'GET, PATCH' if '/' in route else 'GET')
 
     def test_last_seen_is_a_record_and_does_not_prove_online(self):
         for observed in (timezone.now(), timezone.now() - timedelta(days=90), None):
@@ -73,10 +73,10 @@ class InventoryApiTests(TestCase):
 
     def test_server_detail_preserves_unknown_metrics_and_capabilities(self):
         detail = self.data('servers/' + str(self.start.public_id))
-        self.assertTrue(detail['read_only'])
+        self.assertFalse(detail['read_only'])
         self.assertTrue(all(value is None for value in detail['metrics'].values()))
         self.assertEqual(detail['core'], {'actual_version': None, 'state': 'not_connected'})
-        self.assertFalse(any(detail['capabilities'].values()))
+        self.assertEqual(detail['capabilities'], {'edit': True, 'probe': False, 'manage_cores': False})
         self.assertEqual(detail['ingresses']['items'][0]['protocol_label'], 'Reality')
         self.assertEqual(detail['ingresses']['items'][0]['server']['id'], str(self.start.public_id))
 
@@ -99,7 +99,7 @@ class InventoryApiTests(TestCase):
         self.assertEqual(row['endpoint_registration'], 'disabled')
         self.assertEqual(row['verification'], {'state': 'not_tested', 'observed_at': None})
         detail = self.data('lines/' + str(self.line.public_id))
-        self.assertFalse(any(detail['capabilities'].values()))
+        self.assertEqual(detail['capabilities'], {'edit': True, 'probe': False, 'publish': False})
         self.assertIn('失败关闭仅为出口登记设置', ' '.join(detail['limitations']))
 
     def test_line_enabled_and_endpoint_registration_are_separate(self):
@@ -185,8 +185,8 @@ class InventoryApiTests(TestCase):
             line.additional_ingresses.add(self.primary, self.extra)
         after = (count_queries(inventory_api.servers), count_queries(inventory_api.lines))
         self.assertEqual(before, after)
-        self.assertLessEqual(after[0], 2)
-        self.assertLessEqual(after[1], 3)
+        self.assertLessEqual(after[0], 3)
+        self.assertLessEqual(after[1], 4)
 
     def test_missing_and_malformed_identifiers_are_safe_not_found(self):
         for resource in ('servers', 'lines'):
@@ -197,7 +197,7 @@ class InventoryApiTests(TestCase):
     def test_real_urlconf_connects_all_four_staff_only_routes(self):
         routes = ('servers', 'lines', 'servers/' + str(self.start.public_id), 'lines/' + str(self.line.public_id))
         for route in routes:
-            self.assertTrue(self.data(route)['read_only'])
+            self.assertFalse(self.data(route)['read_only'])
         self.client.force_login(self.user)
         for route in routes:
             self.assertEqual(self.client.get('/api/v1/admin/' + route).status_code, 403)

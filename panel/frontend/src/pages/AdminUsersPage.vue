@@ -7,7 +7,7 @@ import type { Pagination } from '../types'
 
 const route = useRoute(), router = useRouter()
 const items = ref<AdminUser[]>([]), busy = ref(true), error = ref('')
-const q = ref(''), status = ref('all'), page = ref(1)
+const q = ref(''), status = ref('all'), service = ref('all'), page = ref(1)
 const pagination = ref<Pagination>({ page: 1, page_size: 25, total: 0, pages: 0, has_next: false, has_previous: false })
 const statuses = [{ id: 'all', label: '全部账号状态' }, { id: 'active', label: '已启用账号' }, { id: 'disabled', label: '已停用账号' }]
 let generation = 0
@@ -15,20 +15,21 @@ async function load() {
   const current = ++generation
   busy.value = true; error.value = ''
   try {
-    const data = await request<AdminUsers>('/admin/users?' + new URLSearchParams({ q: q.value.trim(), status: status.value, page: String(page.value), page_size: '25' }))
+    const data = await request<AdminUsers>('/admin/users?' + new URLSearchParams({ q: q.value.trim(), status: status.value, service: service.value, page: String(page.value), page_size: '25' }))
     if (current === generation) { items.value = data.items; pagination.value = data.pagination }
   } catch (e) { if (current === generation) error.value = errorMessage(e) }
   finally { if (current === generation) busy.value = false }
 }
 async function updateFilters(nextPage: number) {
   page.value = nextPage
-  await router.replace({ path: '/admin/users', query: { ...(q.value.trim() ? { q: q.value.trim() } : {}), ...(status.value !== 'all' ? { status: status.value } : {}), ...(page.value > 1 ? { page: String(page.value) } : {}) } })
+  await router.replace({ path: '/admin/users', query: { ...(q.value.trim() ? { q: q.value.trim() } : {}), ...(status.value !== 'all' ? { status: status.value } : {}), ...(service.value !== 'all' ? { service: service.value } : {}), ...(page.value > 1 ? { page: String(page.value) } : {}) } })
 }
 function search() { void updateFilters(1) }
 function changePage(value: number) { void updateFilters(value) }
 watch(() => route.query, query => {
   q.value = typeof query.q === 'string' ? query.q : ''
   status.value = typeof query.status === 'string' && statuses.some(item => item.id === query.status) ? query.status : 'all'
+  service.value = typeof query.service === 'string' && ['all', 'with', 'none'].includes(query.service) ? query.service : 'all'
   const requestedPage = typeof query.page === 'string' ? Number(query.page) : 1
   page.value = Number.isSafeInteger(requestedPage) && requestedPage > 0 ? requestedPage : 1
   void load()
@@ -38,7 +39,7 @@ onUnmounted(() => { generation++ })
 <template>
   <div class="page-title"><div><p class="eyebrow">管理员工作区</p><h1>用户管理</h1><p class="muted">查找账号，进入具体用户查看分配的服务。</p></div><el-button :loading="busy" @click="load">刷新</el-button></div>
   <section class="surface admin-panel">
-    <form class="table-filters" @submit.prevent="search"><label class="visually-hidden" for="user-search">搜索用户名</label><el-input id="user-search" v-model="q" placeholder="搜索用户名" clearable /><el-select v-model="status" aria-label="账号状态" @change="search"><el-option v-for="item in statuses" :key="item.id" :value="item.id" :label="item.label" /></el-select><el-button type="primary" native-type="submit" :loading="busy">搜索</el-button></form>
+    <form class="table-filters" @submit.prevent="search"><label class="visually-hidden" for="user-search">搜索用户名</label><el-input id="user-search" v-model="q" placeholder="搜索用户名" clearable /><el-select v-model="status" aria-label="账号状态" @change="search"><el-option v-for="item in statuses" :key="item.id" :value="item.id" :label="item.label" /></el-select><el-select v-model="service" aria-label="服务分配状态" @change="search"><el-option value="all" label="全部分配状态" /><el-option value="with" label="已有服务" /><el-option value="none" label="尚无服务" /></el-select><el-button type="primary" native-type="submit" :loading="busy">搜索</el-button></form>
     <el-alert v-if="error" :title="error" type="error" show-icon :closable="false" class="spaced" />
     <template v-else><div class="table-scroll admin-users-table"><el-table v-loading="busy" :data="items" row-key="id" empty-text="没有符合条件的用户">
       <el-table-column label="用户" min-width="210"><template #default="{ row }"><RouterLink :to="{ path: '/admin/users/' + encodeURIComponent(row.id), query: route.query }" class="table-user-link">{{ row.username }}</RouterLink><div class="small muted">账号 #{{ row.id }}</div></template></el-table-column>

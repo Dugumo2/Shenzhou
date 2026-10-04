@@ -5,6 +5,12 @@ import { errorMessage, request } from '../api'
 import { formatDate } from '../display'
 import type { InventoryList, ServerInventory, ServerInventoryDetail } from '../inventoryTypes'
 import type { Pagination } from '../types'
+import type { ResourceMetadata } from '../inventoryTypes'
+import InventoryMetadataEditor from '../components/InventoryMetadataEditor.vue'
+import InventoryChecks from '../components/InventoryChecks.vue'
+import ServerObservationView from '../components/ServerObservationView.vue'
+import { effectiveFreshness, useInventoryClock } from '../inventoryStatus'
+const observationClock = useInventoryClock()
 
 const route = useRoute(), router = useRouter()
 const items = ref<ServerInventory[]>([]), busy = ref(true), error = ref('')
@@ -43,6 +49,12 @@ async function updateFilters(nextPage: number) {
 function search() { void updateFilters(1) }
 function changePage(value: number) { void updateFilters(value) }
 function recordedAt(value: string | null) { return value ? formatDate(value) : '暂无记录' }
+function monitoringLabel(row: ServerInventory) { return ({ fresh:'观测有效期内', stale:'观测已过期', target_changed:'目标已变更', unknown:'未知' } as Record<string,string>)[effectiveFreshness(row.monitoring.state, row.monitoring.expires_at, observationClock.value)] || '未接入监控' }
+function metadataSaved(item: ResourceMetadata) {
+  items.value = items.value.map(row => row.id === item.id ? { ...row, ...item } : row)
+  if (selected.value?.id === item.id) selected.value = { ...selected.value, ...item }
+  if (detail.value?.server.id === item.id) detail.value.server = { ...detail.value.server, ...item }
+}
 watch(() => route.query, query => {
   q.value = typeof query.q === 'string' ? query.q : ''
   status.value = typeof query.status === 'string' && statuses.some(item => item.id === query.status) ? query.status : 'all'
@@ -54,19 +66,19 @@ onUnmounted(() => { generation++; closeDetail() })
 </script>
 <template>
   <div class="page-title"><div><p class="eyebrow">管理员工作区</p><h1>服务器</h1><p class="muted">查看登记的机器、适配器与关联端点。</p></div><el-button :loading="busy" @click="load">刷新登记</el-button></div>
-  <el-alert title="监控尚未接入：登记启用和最后记录都不能证明服务器在线。刷新只读取登记资料。" type="info" show-icon :closable="false" class="inventory-note" />
+  <el-alert title="登记启用和最后记录不证明在线。刷新只读取资料与已有回执，不执行采集或检测。" type="info" show-icon :closable="false" class="inventory-note" />
   <section class="surface admin-panel">
     <form class="table-filters" @submit.prevent="search"><label class="visually-hidden" for="server-search">搜索服务器或适配器</label><el-input id="server-search" v-model="q" placeholder="搜索服务器或适配器" clearable /><el-select v-model="status" aria-label="服务器登记状态" @change="search"><el-option v-for="item in statuses" :key="item.id" :value="item.id" :label="item.label" /></el-select><el-button type="primary" native-type="submit" :loading="busy">搜索</el-button></form>
     <el-alert v-if="error" :title="error" type="error" show-icon :closable="false" class="spaced" />
     <template v-else><div class="table-scroll"><el-table v-loading="busy" :data="items" row-key="id" empty-text="没有符合条件的服务器登记">
       <el-table-column label="服务器" min-width="180"><template #default="{ row }"><el-button link type="primary" @click="showDetail(row)">{{ row.name }}</el-button><div class="small muted">#{{ row.id.slice(0, 8) }}</div></template></el-table-column>
       <el-table-column label="登记状态" min-width="120"><template #default="{ row }"><el-tag type="info">{{ row.enabled ? '登记启用' : '登记停用' }}</el-tag></template></el-table-column>
-      <el-table-column label="监控状态" min-width="140"><template #default><span class="muted">未接入监控</span></template></el-table-column>
+      <el-table-column label="观测状态" min-width="140"><template #default="{ row }"><span class="muted">{{ monitoringLabel(row) }}</span></template></el-table-column>
       <el-table-column label="登记适配器" min-width="140"><template #default="{ row }">{{ row.adapter === 'unconfigured' ? '未配置' : row.adapter }}</template></el-table-column>
       <el-table-column label="登记端点" min-width="140"><template #default="{ row }">{{ row.ingress_count }} 入口 · {{ row.egress_count }} 出口</template></el-table-column>
       <el-table-column label="最后记录" min-width="175"><template #default="{ row }"><span class="small">{{ recordedAt(row.last_seen_at) }}</span></template></el-table-column>
       <el-table-column label="操作" width="100"><template #default="{ row }"><el-button link type="primary" @click="showDetail(row)">查看详情</el-button></template></el-table-column>
-    </el-table></div><div class="table-bottom"><p class="small muted">仅查询；机器监控、核心管理与检测尚未接通。</p><el-pagination :current-page="pagination.page" :page-size="pagination.page_size" :total="pagination.total" layout="total, prev, pager, next" @current-change="changePage" /></div></template>
+    </el-table></div><div class="table-bottom"><p class="small muted">可在详情修改别名和备注；运行控制与持续采集独立验收。</p><el-pagination :current-page="pagination.page" :page-size="pagination.page_size" :total="pagination.total" layout="total, prev, pager, next" @current-change="changePage" /></div></template>
   </section>
   <el-drawer :model-value="selected !== null" :title="selected?.name || '服务器详情'" size="min(720px, 100vw)" @close="closeDetail">
     <el-skeleton v-if="detailBusy" :rows="7" animated />
@@ -74,18 +86,22 @@ onUnmounted(() => { generation++; closeDetail() })
     <el-button v-if="detailError && selected" class="detail-retry" @click="showDetail(selected)">重新读取详情</el-button>
     <template v-if="detail">
       <p class="small muted">编号 {{ detail.server.id }}</p>
-      <div class="section-title"><h2>状态与指标</h2><el-tag type="info">未接入监控</el-tag></div>
-      <dl class="inventory-facts"><div><dt>登记状态</dt><dd>{{ detail.server.enabled ? '登记启用' : '登记停用' }}</dd></div><div><dt>最后记录</dt><dd>{{ recordedAt(detail.server.last_seen_at) }}</dd></div><div><dt>CPU / 内存 / 磁盘</dt><dd>未接入</dd></div><div><dt>网速 / 整机流量</dt><dd>未接入</dd></div><div><dt>实际核心版本</dt><dd>未接入</dd></div><div><dt>指标采样时间</dt><dd>暂无可信样本</dd></div></dl>
+      <InventoryMetadataEditor :item="detail.server" kind="servers" :enabled="detail.capabilities.edit" @saved="metadataSaved" />
+      <ServerObservationView :observation="detail.observation" />
+      <dl class="inventory-facts"><div><dt>登记状态</dt><dd>{{ detail.server.enabled ? '登记启用' : '登记停用' }}</dd></div><div><dt>最后记录</dt><dd>{{ recordedAt(detail.server.last_seen_at) }}</dd></div></dl>
       <p class="quality-note">{{ detail.server.adapter === 'unconfigured' ? '尚未登记适配器。' : `已登记 ${detail.server.adapter} 适配器。` }} 适配器名称不证明核心已安装、正在运行或版本已核验；最后记录也不是健康检测。</p>
       <div class="section-title"><h2>核心与端点登记</h2><RouterLink :to="{ path: '/admin/lines', query: { server_id: detail.server.id } }" @click="closeDetail">查看关联线路 →</RouterLink></div>
-      <p class="small muted">独立核心实例尚未建模，以下为现有入口与出口登记。</p>
+      <p v-if="!detail.cores.items.length" class="small muted">尚无经核对的独立核心实例登记。</p>
+      <section v-for="core in detail.cores.items" :key="core.id" class="core-record"><h3>{{ core.name }} · {{ core.core_type }}</h3><p>登记版本：{{ core.registered_version || '未知' }} · 配置所有者：{{ core.configuration_owner || '未知' }}</p><p class="small muted">配置版本 {{ core.configuration_version || '未知' }}；版本登记不代表正在运行。{{ core.notes }}</p><p v-if="!core.association_valid" class="quality-note">入口关联与所属服务器不一致，需重新核对。</p></section>
+      <p v-if="detail.cores.truncated" class="small muted">仅展示前100个核心登记。</p>
       <h3>入口（{{ detail.ingresses.total }}）</h3>
       <ul v-if="detail.ingresses.items.length" class="endpoint-list"><li v-for="entry in detail.ingresses.items" :key="entry.id"><span>{{ entry.name }}</span><span class="small muted">{{ entry.protocol_label }} · {{ entry.enabled ? '登记启用' : '登记停用' }}</span></li></ul><p v-else class="muted">尚无入口登记。</p>
       <p v-if="detail.ingresses.truncated" class="small muted">当前仅展示前 {{ detail.ingresses.items.length }} 个入口，登记总数为 {{ detail.ingresses.total }}。</p>
       <h3>出口（{{ detail.egresses.total }}）</h3>
       <ul v-if="detail.egresses.items.length" class="endpoint-list"><li v-for="entry in detail.egresses.items" :key="entry.id"><span>{{ entry.name }}</span><span class="small muted">{{ entry.kind_label }}</span></li></ul><p v-else class="muted">尚无出口登记。</p>
       <p v-if="detail.egresses.truncated" class="small muted">当前仅展示前 {{ detail.egresses.items.length }} 个出口，登记总数为 {{ detail.egresses.total }}。</p>
-      <div class="inventory-pending"><h3>检测、流量与账单、备份</h3><p>暂无已接入的检测记录、供应商账单或备份回执。核心编辑、升级、远程检测和备份操作尚未接通。</p></div>
+      <InventoryChecks :checks="detail.checks" />
+      <div class="inventory-pending"><h3>流量与账单、备份</h3><p>供应商账单、核心编辑/升级、主动检测和备份操作尚未接通；已有检测回执在上方按目标与时效展示。</p></div>
     </template>
   </el-drawer>
 </template>

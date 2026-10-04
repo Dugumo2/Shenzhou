@@ -81,6 +81,10 @@ if OPERATOR_ENABLED and not PANEL_LIVE:
 WORKSPACE_V2 = os.environ.get('PANEL_WORKSPACE_V2') == '1'
 SITE_BRAND = os.environ.get('PANEL_SITE_BRAND', '神舟云')[:60]
 FRONTEND_ENABLED = os.environ.get('PANEL_FRONTEND_ENABLED') == '1'
+FRONTEND_RELEASE_ROOT = os.environ.get('PANEL_FRONTEND_RELEASE_ROOT', '')
+FRONTEND_MANIFEST_SHA256 = os.environ.get('PANEL_FRONTEND_MANIFEST_SHA256', '')
+# 元数据编辑不触碰运行配置；生产须单独启用这一能力。
+INVENTORY_METADATA_WRITE_ENABLED = os.environ.get('PANEL_INVENTORY_METADATA_WRITE_ENABLED', '0' if PANEL_LIVE else '1') == '1'
 CANDIDATE_DEMO_DATA = not PANEL_LIVE and os.environ.get('PANEL_CANDIDATE_DEMO_DATA') == '1'
 # 旧P8来源由部署清单显式开启；仅元数据，不在环境中保存真实订阅URL或令牌。
 P8_COMPAT_ENABLED = os.environ.get('PANEL_P8_COMPAT_ENABLED') == '1'

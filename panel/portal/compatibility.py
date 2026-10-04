@@ -6,7 +6,7 @@
 
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
-from enum import StrEnum
+from enum import Enum
 import hashlib
 import json
 import re
@@ -16,6 +16,12 @@ from typing import Protocol
 SYNTHETIC_SCOPE = 'isolated-compatibility-fixture-v1'
 SYNTHETIC_FORMAT = 'compatibility-fixture-json-v1'
 DOWNLOAD_AUTHORITY = 'synthetic-resource-only'
+
+
+class StrEnum(str, Enum):
+    """兼容现场Python3.10；这些合同枚举显式指定字符串值。"""
+    def __str__(self):
+        return self.value
 
 
 class SourceType(StrEnum):

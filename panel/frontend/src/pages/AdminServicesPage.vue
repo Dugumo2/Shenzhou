@@ -7,7 +7,7 @@ import BillingDrawer from '../components/BillingDrawer.vue'
 const items = ref<Service[]>([]), busy = ref(true), error = ref('')
 const q = ref(''), state = ref('all'), page = ref(1), selected = ref<Service | null>(null)
 const pagination = ref<Pagination>({ page: 1, page_size: 25, total: 0, pages: 0, has_next: false, has_previous: false })
-const statuses = [{ id: 'all', label: '全部状态' }, { id: 'active', label: '已应用且统计正常' }, { id: 'pending', label: '待开通' }, { id: 'disabled', label: '已停用' }, { id: 'suspended', label: '已暂停' }, { id: 'expired', label: '已到期' }, { id: 'enforcement_pending', label: '等待生效' }, { id: 'metering_gap', label: '计量存在缺口' }, { id: 'simulated', label: '隔离验证' }]
+const statuses = [{ id: 'all', label: '全部状态' }, { id: 'verification_required', label: '资源待核验' }, { id: 'mapping_required', label: '资料待核对' }, { id: 'account_disabled', label: '账号已停用' }, { id: 'exhausted', label: '额度已用完' }, { id: 'active', label: '已应用且统计正常' }, { id: 'pending', label: '待开通' }, { id: 'disabled', label: '已停用' }, { id: 'suspended', label: '已暂停' }, { id: 'expired', label: '已到期' }, { id: 'enforcement_pending', label: '等待生效' }, { id: 'metering_gap', label: '计量存在缺口' }, { id: 'simulated', label: '隔离验证' }]
 let generation = 0
 async function load() {
   const current = ++generation
@@ -26,10 +26,11 @@ onMounted(load)
     <el-alert v-if="error" :title="error" type="error" show-icon :closable="false" class="spaced" />
     <div class="table-scroll"><el-table v-loading="busy" :data="items" row-key="id" empty-text="没有符合条件的服务">
       <el-table-column label="用户 / 服务编号" min-width="185"><template #default="{ row }"><strong>{{ row.user?.username }}</strong><div class="small muted">神舟云 #{{ row.id.slice(0, 8) }}</div></template></el-table-column>
+      <el-table-column label="资料来源" min-width="115"><template #default="{ row }">{{ row.source_type === 'p8' ? '原订阅资源' : row.source_type === 'membership' ? '会员登记' : '服务权益' }}</template></el-table-column>
       <el-table-column label="总额度" min-width="120"><template #default="{ row }">{{ formatGB(row.quota_bytes) }}</template></el-table-column>
       <el-table-column label="已用" min-width="120"><template #default="{ row }">{{ formatGB(row.used_bytes, '暂无可靠统计') }}<div v-if="row.usage.quality !== 'measured' && row.used_bytes !== null" class="small muted">上次已确认</div></template></el-table-column>
       <el-table-column label="剩余" min-width="110"><template #default="{ row }">{{ formatGB(row.remaining_bytes, '待核算') }}</template></el-table-column>
-      <el-table-column label="到期时间" min-width="175"><template #default="{ row }">{{ formatDate(row.expires_at) }}</template></el-table-column>
+      <el-table-column label="到期时间" min-width="175"><template #default="{ row }">{{ row.source_type === 'p8' && !row.expires_at ? '暂不可确认' : formatDate(row.expires_at) }}</template></el-table-column>
       <el-table-column label="状态" min-width="130"><template #default="{ row }"><el-tag :type="row.business_state === 'active' ? 'success' : 'info'">{{ row.status_label }}</el-tag></template></el-table-column>
       <el-table-column label="操作" min-width="115"><template #default="{ row }"><el-button v-if="row.actions?.billing" link type="primary" @click="selected = row">重置时间</el-button><span v-else class="small muted">暂不可调整</span></template></el-table-column>
     </el-table></div>

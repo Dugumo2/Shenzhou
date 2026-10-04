@@ -95,41 +95,18 @@ def _service(record, source_type, period, now):
 
 @endpoint()
 def service_usage(request, public_id):
-    from . import p8_compat
+    from .service_projection import project, resolve
+    from .p8_compat import unknown_usage
     periods = request.GET.getlist('period')
     period = periods[0] if periods else 'current'
     if len(periods) > 1 or period not in PERIODS:
         return error('invalid_filter', '请选择本期、近7天或近30天。', 422,
                      {'period': ['仅支持 current、7d、30d。']})
-    try:
-        value = uuid.UUID(public_id)
-    except (ValueError, TypeError, AttributeError):
+    result = resolve(request.user, public_id)
+    if result is None:
         return error('not_found', '服务不存在或不可访问。', 404)
-    p8_usage = p8_compat.service_usage(request.user, value, period)
-    if p8_usage is not None:
-        return success(p8_usage)
-    # 显式关联失效或冲突时，旧会员UUID不得借别名回到可信额度/账本。
-    from .models import Membership
-    disputed = Membership.objects.filter(user=request.user, public_id=value,
-                                          pk__in=p8_compat.claimed_membership_ids(request.user)).first()
-    if disputed is not None:
-        data = _service(disputed, 'membership', period, timezone.now())
-        data['current_cycle'] = None
-        data['summary'] = {key: None for key in ('quota_bytes','charged_bytes','upload_bytes','download_bytes','remaining_bytes','next_reset_at')}
-        data['summary']['quota_state'] = 'unknown'
-        data['quality'] = {'state':'unknown','message':'来源关联需要重新核对，暂无可靠统计。','collected_at':None}
-        data['history'].update(totals=None, record_count=0, excluded_record_count=0, days=[], days_truncated=False,
-                               message='来源关联待核对；没有记录不代表零流量。')
-        return success(data)
-    record = service_queryset().filter(user=request.user, public_id=value).first()
-    if record is None:
-        # 与服务详情保持相同的已核验旧UUID别名；坏绑定不能绕过列表门禁。
-        binding = verified_legacy_bindings().filter(owner=request.user, membership__public_id=value).first()
-        if binding is not None and binding.entitlement_id is not None:
-            record = binding.entitlement
-    if record is not None:
-        return success(_service(record, 'entitlement', period, timezone.now()))
-    legacy = visible_legacy_services().select_related('user').filter(user=request.user, public_id=value).first()
-    if legacy is None:
-        return error('not_found', '服务不存在或不可访问。', 404)
-    return success(_service(legacy, 'membership', period, timezone.now()))
+    kind, record = result
+    item = project(record, kind)
+    if kind == 'p8' or item['state'] == 'mapping_required':
+        return success(unknown_usage(record.public_id, period, source_type=kind))
+    return success(_service(record, kind, period, timezone.now()))

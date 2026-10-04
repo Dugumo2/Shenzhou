@@ -46,9 +46,11 @@ export function navigationForWorkspace(admin: boolean): readonly NavigationGroup
   return (admin ? adminNavigation : userNavigation).filter(group => group.enabled)
 }
 export function isNavigationActive(path: string, target: string): boolean {
+  if (target === '/admin/rules' && path.startsWith('/admin/rule-policies')) return true
   return path === target || path.startsWith(target + '/')
 }
 export function breadcrumbsForPath(path: string): BreadcrumbItem[] {
+  if (path.startsWith('/admin/rule-policies')) return [{ label: '代理规则', path: '/admin/rules' }, { label: '组合方案' }]
   const groups = path === '/admin' || path.startsWith('/admin/') ? adminNavigation : userNavigation
   const item = groups.flatMap(group => group.items).find(candidate => isNavigationActive(path, candidate.path))
   if (!item) return [{ label: '神舟云' }]

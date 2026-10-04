@@ -187,8 +187,19 @@ def _bindings(user):
         return P8SourceBinding.objects.none()
     if not get_user_model().objects.filter(pk=user.pk, is_active=True).exists():
         return P8SourceBinding.objects.none()
+    return eligible_bindings().filter(owner_id=user.pk)
+
+
+def eligible_bindings():
+    """仅元数据资格查询；管理投影复用，不提供管理员秘密读取权。"""
+    from django.conf import settings
+    from django.db.models import F, Q
+    from django.utils import timezone
+    from .models import DeviceSubscription, Entitlement, Membership, P8SourceBinding
+    if getattr(settings, 'P8_COMPAT_ENABLED', False) is not True:
+        return P8SourceBinding.objects.none()
     # 旧服务和设备UUID发生冲突时，禁止借新兼容入口获得不同资源。
-    return P8SourceBinding.objects.filter(owner_id=user.pk, owner__is_active=True,
+    return P8SourceBinding.objects.filter(owner__is_active=True,
         enabled=True, state='verified', revision__gte=1, verified_at__lte=timezone.now(),
         verified_by__is_active=True, verified_by__is_staff=True).filter(
         Q(legacy_membership__isnull=True) | Q(legacy_membership__user_id=F('owner_id'),
@@ -297,10 +308,18 @@ def service_usage(user, public_id, period='current'):
     binding = current_binding(user, public_id)
     if binding is None:
         return None
+    return unknown_usage(binding.public_id, period)
+
+
+def unknown_usage(public_id, period='current', *, source_type='p8'):
+    """共享未知投影；失效来源不回退到会员登记额度或其他服务账本。"""
+    from datetime import timedelta
+    from zoneinfo import ZoneInfo
+    from django.utils import timezone
     now = timezone.now()
     start = (None if period == 'current' else now.astimezone(ZoneInfo('Asia/Shanghai')).replace(
         hour=0, minute=0, second=0, microsecond=0) - timedelta(days=int(period[:-1]) - 1))
-    return {'service_id': str(binding.public_id), 'source_type': 'p8', 'time_zone': 'Asia/Shanghai',
+    return {'service_id': str(public_id), 'source_type': source_type, 'time_zone': 'Asia/Shanghai',
         'generated_at': now.isoformat(), 'period': period, 'current_cycle': None,
         'summary': {'quota_bytes': None, 'quota_state': 'unknown', 'charged_bytes': None,
                     'upload_bytes': None, 'download_bytes': None, 'remaining_bytes': None, 'next_reset_at': None},
