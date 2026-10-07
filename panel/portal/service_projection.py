@@ -55,7 +55,7 @@ def valid_p8(record):
     return p8_compat.eligible_bindings().filter(pk=record.pk).exists() and p8_compat._source_config(record) is not None
 
 
-def project(record, kind, *, administrator=False, detail=False, now=None):
+def project(record, kind, *, administrator=False, detail=False, now=None, viewer=None, usage_source=None):
     now = now or timezone.now()
     if kind == 'p8':
         item = p8_compat._project(record, detail=detail)
@@ -82,6 +82,13 @@ def project(record, kind, *, administrator=False, detail=False, now=None):
     if administrator:
         item['user'] = {'username': owner.get_username()}
         item.setdefault('compatibility', owner_compatibility(owner))
+    if usage_source is None and viewer is not None:
+        from .service_usage_source import ServiceUsageSource
+        usage_source = ServiceUsageSource(viewer)
+    if usage_source is not None:
+        provider_usage = usage_source.read(record, kind, item)
+        if provider_usage is not None:
+            item['provider_usage'] = provider_usage
     return item
 
 
@@ -139,7 +146,9 @@ def service_index(owner=None, *, q='', state='all', now=None):
     return indices[0].union(*indices[1:]).order_by('sort_name', 'public_id', 'source_type')
 
 
-def project_index(rows, *, administrator=False, detail=False):
+def project_index(rows, *, administrator=False, detail=False, viewer=None):
+    from .service_usage_source import ServiceUsageSource
+    usage_source = ServiceUsageSource(viewer)
     rows = list(rows)
     records = {}
     for kind, query in service_queries().items():
@@ -151,7 +160,8 @@ def project_index(rows, *, administrator=False, detail=False):
         actual_owner = (record.owner_id if row['source_type'] == 'p8' else record.user_id) if record else None
         if record is None or actual_owner != row['service_owner'] or record.public_id != row['public_id']:
             continue
-        result.append(project(record, row['source_type'], administrator=administrator, detail=detail))
+        result.append(project(record, row['source_type'], administrator=administrator, detail=detail,
+                              usage_source=usage_source))
     return result
 
 

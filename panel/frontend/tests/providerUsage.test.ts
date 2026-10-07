@@ -126,8 +126,46 @@ test('未知额度和缺失指标不补零，没有到期日期不意味着等�
   assert.match(html, /<dt>额度<\/dt><dd>未提供<\/dd>/)
   assert.doesNotMatch(html, /class="quota-track/)
   assert.doesNotMatch(html, /<dt>上传</)
-  assert.match(html, /<dt>下载<\/dt><dd>0 GB<\/dd>/)
+  assert.match(html, /下载<\/dt><dd>0 GB<\/dd>/)
   assert.doesNotMatch(html, /待开通|永久有效|不限流量/)
+})
+
+test('真实来源数据接入后仍渲染额度圆环和传输构成图，不退化为数字卡', async () => {
+  const home = await renderCard(meter())
+  assert.match(home, /data-chart="quota-gauge"/)
+  assert.match(home, /conic-gradient/)
+  assert.match(home, /data-chart="transfer-composition"/)
+  assert.match(home, /传输构成：上传/)
+  const official = await renderCard(meter({ scope: 'server', source_kind: 'official', upload_bytes: null, download_bytes: null }))
+  assert.match(official, /data-chart="quota-gauge"/)
+  assert.doesNotMatch(official, /data-chart="transfer-composition"/)
+  const unknown = await renderCard(meter({ quota_bytes: null, remaining_bytes: null }))
+  assert.match(unknown, /quota-ring unknown/)
+  assert.match(unknown, /暂无可计算比例/)
+})
+
+test('构成比例限制两位小数，零传输与缺失指标不会画虚假构成', async () => {
+  const fraction = await renderCard(meter({ upload_bytes: '3303', download_bytes: '6697' }))
+  assert.match(fraction, /传输构成：上传 33.03%，下载 66.97%/)
+  assert.doesNotMatch(fraction, /66\.9700/)
+  const zero = await renderCard(meter({ upload_bytes: '0', download_bytes: '0' }))
+  assert.doesNotMatch(zero, /data-chart="transfer-composition"/)
+  assert.equal((zero.match(/<dd>0 GB<\/dd>/g) || []).length, 2)
+  const missing = await renderCard(meter({ quality: 'missing', quota_bytes: null, used_bytes: null, remaining_bytes: null, upload_bytes: null, download_bytes: null }))
+  assert.match(missing, /暂无可计算比例/)
+  assert.doesNotMatch(missing, /conic-gradient\(|0 GB|data-chart="transfer-composition"/)
+})
+
+test('过期和错误仍保留图形与采样时间，同时说明圆环不能确认当前余额', async () => {
+  for (const quality of ['stale', 'error', 'gap'] as const) {
+    const html = await renderCard(meter({ quality }))
+    assert.match(html, /data-chart="quota-gauge"/)
+    assert.match(html, /data-chart="transfer-composition"/)
+    assert.match(html, /灰色部分不代表当前已确认剩余/)
+    assert.match(html, /最后更新/)
+    assert.match(html, /14:58/)
+    assert.match(html, /326.46 GB/)
+  }
 })
 
 test('过期自动降级并保留上次值，恢复新样本后异常提醒消失', async () => {
@@ -159,7 +197,8 @@ test('缺口卡24小时后仍显示缺口和未知剩余，同时提示更新延
 test('空列表和读取失败都有统一可读状态，schema1不会冒充新资源卡', async () => {
   const empty = await renderToString(vue.createSSRApp(Dashboard, { data: payload([]) }))
   assert.match(empty, /暂无资源用量记录/)
-  const failed = await renderToString(vue.createSSRApp(Dashboard, { data: { ...payload([]), error: { code: 'snapshot_missing', message: '用量资料尚未同步' } } }))
+  const failedPayload: ProviderUsage = { ...payload([]), generated_at: null, error: { code: 'snapshot_missing', message: '用量资料尚未同步' } }
+  const failed = await renderToString(vue.createSSRApp(Dashboard, { data: failedPayload }))
   assert.match(failed, /用量资料尚未同步/)
   assert.doesNotMatch(failed, /0 GB|暂无资源用量记录/)
   const old = await renderToString(vue.createSSRApp(Dashboard, { data: { schema_version: 1 } }))

@@ -1,7 +1,11 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
-import { request, errorMessage } from '../api'
+import { useSnapshotRequest } from '../useSnapshotRequest'
+import { useSessionIdentity } from '../useSessionIdentity'
+import { retainServiceResources, retainResourceUsage, resourceReadError } from '../resourceSnapshot'
+import type { UsageOverviewData, UsagePeriod } from '../usage-types'
+import RefreshControl from '../components/RefreshControl.vue'
 import type { Client, Service } from '../types'
 import ServiceMetrics from '../components/ServiceMetrics.vue'
 import UsageOverview from '../components/UsageOverview.vue'
@@ -9,8 +13,19 @@ import DeliveryResources from '../components/DeliveryResources.vue'
 import P8DeliveryResources from '../components/P8DeliveryResources.vue'
 import { auth } from '../auth'
 const route = useRoute()
-const service = ref<Service | null>(null), clients = ref<Client[]>([])
-const busy = ref(true), error = ref(''), device = ref(''), os = ref(''), clientId = ref('')
+const identity = useSessionIdentity(() => auth.session)
+const serviceSnapshot = useSnapshotRequest<Service>({ reconcile: retainServiceResources })
+const usageSnapshot = useSnapshotRequest<UsageOverviewData>({ reconcile: retainResourceUsage })
+const catalogSnapshot = useSnapshotRequest<{ items: Client[] }>()
+const service = serviceSnapshot.data
+const clients = computed(() => catalogSnapshot.data.value?.items || [])
+const busy = computed(() => serviceSnapshot.busy.value || usageSnapshot.busy.value || catalogSnapshot.busy.value)
+const error = computed(() => serviceSnapshot.error.value || catalogSnapshot.error.value)
+const updateError = computed(() => error.value || usageSnapshot.error.value)
+const sourceError = computed(() => resourceReadError(usageSnapshot.data.value ? [usageSnapshot.data.value] : service.value ? [service.value] : []))
+const lastReadAt = ref<string | null>(null)
+const device = ref(''), os = ref(''), clientId = ref('')
+const usagePeriod = ref<UsagePeriod>('current')
 const refreshKey = ref(0)
 const activeSection = ref('overview'), choosing = ref(true)
 const deviceOptions = [{ id: 'phone', label: '手机', hint: 'Android / iOS' }, { id: 'computer', label: '电脑', hint: 'Windows / macOS / Linux' }, { id: 'router', label: '路由器', hint: '查看适配情况' }]
@@ -26,36 +41,48 @@ const downloadUrl = computed(() => {
 watch(device, () => { os.value = ''; clientId.value = '' })
 watch(os, () => { clientId.value = '' })
 watch(clientId, value => { choosing.value = !value })
-let generation = 0
-async function load() {
-  const current = ++generation
-  if (service.value?.source_type === 'p8') service.value = null
-  busy.value = true; error.value = ''
-  try {
-    const [detail, catalog] = await Promise.all([request<Service>('/me/services/' + encodeURIComponent(String(route.params.id))), request<{ items: Client[] }>('/catalog/clients')])
-    if (current === generation) { service.value = detail; clients.value = catalog.items; refreshKey.value++ }
-  } catch (e) { if (current === generation) error.value = errorMessage(e) }
-  finally { if (current === generation) busy.value = false }
+async function loadUsage() {
+  if (!service.value) return
+  return usageSnapshot.load('/me/services/' + encodeURIComponent(service.value.id) + '/usage?period=' + usagePeriod.value, identity.value)
 }
-onMounted(load)
-watch(() => route.params.id, () => { service.value = null; device.value = ''; activeSection.value = 'overview'; void load() })
-watch(() => auth.session?.user?.username, () => { generation++; service.value = null; clients.value = []; device.value = ''; activeSection.value = 'overview'; if (auth.session?.authenticated) void load() })
-onBeforeUnmount(() => { generation++ })
+async function load() {
+  const owner = identity.value
+  // 刷新下载权限时，交付组件自行重新核验；统计与软件选择保留。
+  refreshKey.value++
+  const [detail] = await Promise.all([
+    serviceSnapshot.load('/me/services/' + encodeURIComponent(String(route.params.id)), owner),
+    catalogSnapshot.hasLoaded.value ? Promise.resolve() : catalogSnapshot.load('/catalog/clients', owner),
+  ])
+  if (owner !== identity.value) return
+  if (!detail) {
+    if (!service.value) { usageSnapshot.reset(); lastReadAt.value = null }
+    return
+  }
+  // 别名映射后只按正式服务编号读取用量，概览与用量分区共享这一份结果。
+  const usage = await loadUsage()
+  if (usage && owner === identity.value && !catalogSnapshot.error.value) lastReadAt.value = new Date().toISOString()
+}
+watch(usagePeriod, () => { if (service.value) void loadUsage() })
+watch(() => [route.params.id, identity.value], () => {
+  serviceSnapshot.reset(); usageSnapshot.reset(); catalogSnapshot.reset(); lastReadAt.value = null
+  device.value = ''; os.value = ''; clientId.value = ''; activeSection.value = 'overview'; usagePeriod.value = 'current'
+  if (auth.session?.authenticated) void load()
+}, { immediate: true, flush: 'sync' })
 </script>
 <template>
   <RouterLink to="/services" class="back-link">← 我的服务</RouterLink>
-  <div class="page-title"><div><p class="eyebrow">服务详情</p><h1>神舟云 <span class="short-id">#{{ String(service?.id || route.params.id).slice(0, 8) }}</span></h1></div><el-button :loading="busy" @click="load">刷新</el-button></div>
+  <div class="page-title"><div><p class="eyebrow">服务详情</p><h1>神舟云 <span class="short-id">#{{ String(service?.id || route.params.id).slice(0, 8) }}</span></h1></div><RefreshControl :loading="busy" :error="updateError" :source-error="sourceError" :last-read-at="lastReadAt" @refresh="load" /></div>
   <el-alert v-if="error" :title="error" type="error" show-icon :closable="false" class="spaced" />
   <el-skeleton v-if="busy && !service" :rows="6" animated />
   <template v-if="service">
     <el-tabs v-model="activeSection" class="service-sections" aria-label="服务功能分区">
     <el-tab-pane label="服务概览" name="overview">
-    <UsageOverview :key="service.id + '-overview'" :service-id="service.id" :refresh-key="refreshKey" summary-only />
+    <UsageOverview :key="service.id + '-overview'" :service-id="service.id" :refresh-key="refreshKey" managed :snapshot="usageSnapshot.data.value" :loading="usageSnapshot.busy.value" :load-error="usageSnapshot.error.value" summary-only />
     <section class="surface detail-summary"><ServiceMetrics :service="service" lifecycle-only /></section>
     <div class="service-actions"><button class="surface" @click="activeSection = 'connect'"><strong>连接设置 →</strong><span>选择设备和软件，按步骤导入订阅。</span></button><button class="surface" @click="activeSection = 'usage'"><strong>查看流量用量 →</strong><span>查看本期使用情况和统计详情。</span></button></div>
     </el-tab-pane>
     <el-tab-pane label="流量用量" name="usage" lazy>
-    <UsageOverview :key="service.id" :service-id="service.id" :refresh-key="refreshKey" />
+    <UsageOverview :key="service.id" :service-id="service.id" :refresh-key="refreshKey" managed :snapshot="usageSnapshot.data.value" :loading="usageSnapshot.busy.value" :load-error="usageSnapshot.error.value" @period-change="usagePeriod = $event" />
     </el-tab-pane>
     <el-tab-pane label="连接设置" name="connect" lazy>
     <section class="surface setup-panel"><div class="section-title"><div><h2>{{ selected && !choosing ? selected.name + ' 连接设置' : '选择设备和软件' }}</h2><p class="muted small">更换软件沿用这份服务，无需重新选择线路。</p></div><el-button v-if="selected && !choosing" @click="choosing = true">更换设备或软件</el-button></div>

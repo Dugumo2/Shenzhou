@@ -1,32 +1,39 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, watch } from 'vue'
-import { request, errorMessage } from '../api'
+import { computed, ref, watch } from 'vue'
+import { useSnapshotRequest } from '../useSnapshotRequest'
+import { useSessionIdentity } from '../useSessionIdentity'
+import { retainResourceUsage, resourceReadError } from '../resourceSnapshot'
+import { auth } from '../auth'
+import RefreshControl from './RefreshControl.vue'
 import { formatDate, formatGB, integerBytes } from '../display'
 import { reliableUsagePercent } from '../usage-types'
 import UsageDashboard from './UsageDashboard.vue'
 import ProviderUsageDashboard from './ProviderUsageDashboard.vue'
 import type { UsageOverviewData, UsagePeriod, UsageBytes } from '../usage-types'
 
-const props = defineProps<{ serviceId: string; refreshKey?: number; summaryOnly?: boolean }>()
-const period = ref<UsagePeriod>('current'), data = ref<UsageOverviewData | null>(null)
-const busy = ref(false), error = ref('')
+const props = defineProps<{
+  serviceId: string; refreshKey?: number; summaryOnly?: boolean
+  managed?: boolean; snapshot?: UsageOverviewData | null; loading?: boolean; loadError?: string
+}>()
+const emit = defineEmits<{ 'period-change': [period: UsagePeriod] }>()
+const identity = useSessionIdentity(() => auth.session)
+const reader = useSnapshotRequest<UsageOverviewData>({ reconcile: retainResourceUsage })
+const period = ref<UsagePeriod>('current')
+const data = computed(() => props.managed ? props.snapshot || null : reader.data.value)
+const sourceError = computed(() => resourceReadError(data.value ? [data.value] : []))
+const busy = computed(() => props.managed ? !!props.loading : reader.busy.value)
+const error = computed(() => props.managed ? props.loadError || '' : reader.error.value)
 const recordsOpen = ref(false)
 const headingId = computed(() => 'usage-' + props.serviceId + (props.summaryOnly ? '-summary' : '-detail'))
 const periods: { id: UsagePeriod; label: string }[] = [{ id: 'current', label: '本期' }, { id: '7d', label: '近7天' }, { id: '30d', label: '近30天' }]
 const qualityLabel = computed(() => ({ measured: '已取得当前样本', stale: '统计已过期', gap: '统计存在缺口', unknown: '暂无可靠统计' })[data.value?.quality.state || 'unknown'])
 const percentage = computed(() => data.value ? reliableUsagePercent(data.value) : null)
-let generation = 0
-async function load() {
-  const current = ++generation
-  busy.value = true; error.value = ''; data.value = null
-  try {
-    const result = await request<UsageOverviewData>('/me/services/' + encodeURIComponent(props.serviceId) + '/usage?period=' + period.value)
-    if (current === generation) data.value = result
-  } catch (e) { if (current === generation) error.value = errorMessage(e) }
-  finally { if (current === generation) busy.value = false }
+function load() {
+  if (props.managed) return
+  return reader.load('/me/services/' + encodeURIComponent(props.serviceId) + '/usage?period=' + period.value, identity.value)
 }
-watch(() => [props.serviceId, props.refreshKey, period.value], () => { void load() }, { immediate: true })
-onBeforeUnmount(() => { generation++ })
+watch(() => [props.serviceId, props.refreshKey, period.value, identity.value], () => { if (!props.managed) void load() }, { immediate: true })
+watch(period, value => { if (props.managed) emit('period-change', value) })
 function bytes(value: UsageBytes, unknown = '暂无可靠统计') {
   const parsed = integerBytes(value)
   // 非零小样本不能因GB两位显示而伪装成0GB。
@@ -36,11 +43,11 @@ function bytes(value: UsageBytes, unknown = '暂无可靠统计') {
 
 <template>
   <section class="surface usage-overview" :aria-labelledby="headingId" :aria-busy="busy">
-    <div class="section-title"><div><h2 :id="headingId">{{ summaryOnly ? '流量仪表盘' : '流量用量与统计图' }}</h2><p class="small muted">{{ data?.provider_usage ? '查看已接入来源的用量和更新时间。' : '查看这份服务的额度占用与传输构成。' }}</p></div><el-button :loading="busy" @click="load">刷新统计</el-button></div>
+    <div class="section-title"><div><h2 :id="headingId">{{ summaryOnly ? '流量仪表盘' : '流量用量与统计图' }}</h2><p class="small muted">{{ data?.provider_usage ? '查看已接入来源的用量和更新时间。' : '查看这份服务的额度占用与传输构成。' }}</p></div><RefreshControl v-if="!managed" :loading="busy" :error="error" :source-error="sourceError" :last-read-at="reader.lastReadAt.value" @refresh="load" /></div>
     <el-alert v-if="error" :title="error" type="error" show-icon :closable="false" />
-    <el-skeleton v-if="busy" :rows="4" animated />
+    <el-skeleton v-if="busy && !data" :rows="4" animated />
     <template v-if="data">
-      <ProviderUsageDashboard v-if="data.provider_usage" :data="data.provider_usage" />
+      <template v-if="data.provider_usage"><ProviderUsageDashboard :data="data.provider_usage" /><p v-if="!summaryOnly" class="small muted">当前来源提供用量快照，尚未提供可用于绘制趋势的历史采样。</p></template>
       <template v-else>
       <div class="quality-line"><el-tag :type="data.quality.state === 'measured' ? 'success' : 'warning'">{{ qualityLabel }}</el-tag><span class="small muted">最后采集：{{ data.quality.collected_at ? formatDate(data.quality.collected_at) : '暂无采集记录' }}</span></div>
       <p class="quality-note">{{ data.quality.message }}</p>

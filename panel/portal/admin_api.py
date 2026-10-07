@@ -79,7 +79,7 @@ def user_detail(request, user_id):
     user = users_query().filter(pk=int(user_id)).first()
     if user is None:
         return error('not_found', '用户不存在或不可访问。', 404)
-    services = project_index(service_index(user), administrator=True)
+    services = project_index(service_index(user), administrator=True, viewer=request.user)
     return success({'user': user_projection(user), 'services': services,
                     'capabilities': {'create': False, 'quota': False, 'renew': False,
                                      'grants': False, 'enable': False}})

@@ -10,18 +10,29 @@ let csrfToken = ''
 let onUnauthorized: (() => void) | null = null
 export function setCsrfToken(token: string) { csrfToken = token }
 export function setUnauthorizedHandler(handler: () => void) { onUnauthorized = handler }
-export async function request<T>(path: string, method = 'GET', body?: unknown): Promise<T> {
+export async function request<T>(path: string, method = 'GET', body?: unknown, signal?: AbortSignal): Promise<T> {
+  // 已失效的旧读取不能用迟到的401清除刚建立的新会话。
+  const ensureActive = () => { if (signal?.aborted) throw new ApiError(0, 'REQUEST_ABORTED', '本次读取已取消。') }
+  ensureActive()
   const headers: Record<string, string> = { Accept: 'application/json' }
   if (method !== 'GET') { headers['Content-Type'] = 'application/json'; headers['X-CSRFToken'] = csrfToken }
   let response: Response
   try {
-    response = await fetch('/api/v1' + path, { method, headers, credentials: 'same-origin', cache: 'no-store', ...(body === undefined ? {} : { body: JSON.stringify(body) }) })
-  } catch { throw new ApiError(0, 'NETWORK_ERROR', '暂时无法连接，请检查网络后重试。当前内容已保留。') }
-  let payload: { data?: T; error?: { code?: string; message?: string; fields?: Record<string, string[]> } }
-  try { payload = await response.json() } catch {
+    response = await fetch('/api/v1' + path, { method, headers, credentials: 'same-origin', cache: 'no-store', ...(signal ? { signal } : {}), ...(body === undefined ? {} : { body: JSON.stringify(body) }) })
+  } catch { ensureActive(); throw new ApiError(0, 'NETWORK_ERROR', '暂时无法连接，请检查网络后重试。当前内容已保留。') }
+  ensureActive()
+  let raw: unknown
+  try { raw = await response.json() } catch {
+    ensureActive()
     if (response.status === 401) onUnauthorized?.()
     throw new ApiError(response.status, 'INVALID_RESPONSE', '服务暂时无法返回有效内容，请稍后重试。')
   }
+  ensureActive()
+  if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) {
+    if (response.status === 401) onUnauthorized?.()
+    throw new ApiError(response.status, 'INVALID_RESPONSE', '服务暂时无法返回有效内容，请稍后重试。')
+  }
+  const payload = raw as { data?: T; error?: { code?: string; message?: string; fields?: Record<string, string[]> } }
   if (!response.ok || payload.error) {
     if (response.status === 401) onUnauthorized?.()
     throw new ApiError(response.status, payload.error?.code || 'REQUEST_FAILED', payload.error?.message || '操作未完成，请稍后重试。', payload.error?.fields || {})

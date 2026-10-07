@@ -106,16 +106,10 @@ def service_usage(request, public_id):
     if result is None:
         return error('not_found', '服务不存在或不可访问。', 404)
     kind, record = result
-    item = project(record, kind)
+    item = project(record, kind, viewer=request.user)
     if kind == 'p8' or item['state'] == 'mapping_required':
         value = unknown_usage(record.public_id, period, source_type=kind)
-        # 供应商整机用量只向该已核P8的管理员本人展示，不当作个人套餐余额。
-        from django.conf import settings
-        source = getattr(settings, 'PROVIDER_USAGE_SOURCE', {})
-        if (kind == 'p8' and item['state'] != 'mapping_required' and request.user.is_staff
-                and source and record.source_instance == source['source_instance']
-                and record.source_id == source['source_id']):
-            from .resource_usage_view import read_resource_usage_view
-            value['provider_usage'] = read_resource_usage_view(source['path'])
+        if 'provider_usage' in item:
+            value['provider_usage'] = item['provider_usage']
         return success(value)
     return success(_service(record, kind, period, timezone.now()))

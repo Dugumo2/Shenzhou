@@ -25,7 +25,7 @@ def instant(value, nullable=True):
 
 def read_resource_usage_view(path=None, *, now=None):
     now = now or datetime.now(timezone.utc)
-    fallback = {'schema_version':2,'generated_at':now.isoformat(),'meters':[],
+    fallback = {'schema_version':2,'generated_at':None,'meters':[],
                 'error':{'code':'usage_unavailable','message':'统计暂不可用，请查看采集状态或稍后刷新。'}}
     if not path:
         return fallback

@@ -33,3 +33,40 @@ test('网络失败和非JSON响应明确失败，没有假成功', async () => {
   globalThis.fetch = async () => new Response('<html>error</html>', { status: 503 })
   await assert.rejects(request('/session'), (e: unknown) => e instanceof ApiError && e.status === 503 && e.code === 'INVALID_RESPONSE')
 })
+
+test('无效JSON envelope保留HTTP状态；当前401仍通知退出', async () => {
+  let expired = 0
+  setUnauthorizedHandler(() => { expired++ })
+  for (const status of [200, 401, 403, 404, 500]) for (const body of [null, [], 3, 'invalid']) {
+    globalThis.fetch = async () => Response.json(body, { status })
+    await assert.rejects(request('/session'), (e: unknown) => e instanceof ApiError && e.status === status && e.code === 'INVALID_RESPONSE')
+  }
+  assert.equal(expired, 4)
+})
+
+test('响应头到达后取消，迟到JSON或解析失败的401不清新会话', async () => {
+  for (const failure of [false, true]) {
+    let resolve!: (value: unknown) => void, reject!: (reason: unknown) => void
+    const body = new Promise<unknown>((yes, no) => { resolve = yes; reject = no })
+    let expired = 0
+    setUnauthorizedHandler(() => { expired++ })
+    const controller = new AbortController()
+    globalThis.fetch = async (_url, options) => {
+      assert.equal(options?.signal, controller.signal)
+      return { status: 401, ok: false, json: () => body } as Response
+    }
+    const operation = request('/session', 'GET', undefined, controller.signal)
+    await Promise.resolve()
+    controller.abort()
+    if (failure) reject(new SyntaxError('非JSON'))
+    else resolve({ error: { code: 'AUTH_REQUIRED' } })
+    await assert.rejects(operation, (e: unknown) => e instanceof ApiError && e.code === 'REQUEST_ABORTED')
+    assert.equal(expired, 0)
+  }
+})
+
+test('预先取消的请求不发fetch', async () => {
+  globalThis.fetch = async () => { assert.fail('已取消请求不应发送') }
+  const controller = new AbortController(); controller.abort()
+  await assert.rejects(request('/session', 'GET', undefined, controller.signal), (e: unknown) => e instanceof ApiError && e.code === 'REQUEST_ABORTED')
+})

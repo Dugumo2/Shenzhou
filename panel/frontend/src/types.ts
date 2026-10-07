@@ -1,3 +1,4 @@
+import type { ProviderUsage } from './providerUsage'
 export type Bytes = string | number | null
 export interface Session {
   authenticated: boolean
@@ -9,6 +10,7 @@ export interface Session {
 export interface Delivery { state: string; message: string; download_url: string | null }
 export interface Compatibility { state: string; message: string | null }
 export interface Service {
+  provider_usage?: ProviderUsage
   id: string; name: string; quota_bytes: Bytes; used_bytes: Bytes; raw_bytes: Bytes
   remaining_bytes: Bytes; next_reset_at: string | null; expires_at: string | null
   state: string; enabled: boolean; status_label: string; source_type: 'entitlement' | 'membership' | 'p8'

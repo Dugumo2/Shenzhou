@@ -13,7 +13,8 @@ export interface ResourceUsageMeter {
   alerts: ResourceUsageAlert[]; details: Record<string, unknown>
 }
 export interface ProviderUsage {
-  schema_version: 2; generated_at: string; meters: ResourceUsageMeter[]
+  source_key?: string
+  schema_version: 2; generated_at: string | null; meters: ResourceUsageMeter[]
   error?: { code: string; message: string }
 }
 // 保留原类型名供调用方迁移；字段合同统一为schema 2，不接收旧两供应商结构。

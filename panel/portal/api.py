@@ -132,7 +132,7 @@ def logout(request):
 @endpoint()
 def my_services(request):
     from .service_projection import owner_compatibility, project_index, service_index
-    items = project_index(service_index(request.user))
+    items = project_index(service_index(request.user), viewer=request.user)
     return success({'items': items, 'service_count': len(items),
                     'compatibility': owner_compatibility(request.user)})
 
@@ -150,7 +150,7 @@ def my_service_detail(request, public_id):
     if result is None:
         return error('not_found', '服务不存在或不可访问。', 404)
     kind, record = result
-    return success(project(record, kind, detail=True))
+    return success(project(record, kind, detail=True, viewer=request.user))
 
 
 @endpoint()
@@ -195,7 +195,7 @@ def admin_services(request):
         page = paginator.page(options[0])
     except EmptyPage:
         return error('page_not_found', '此页不存在，请返回前一页。', 404)
-    items = project_index(page.object_list, administrator=True)
+    items = project_index(page.object_list, administrator=True, viewer=request.user)
     return success({'items': items, 'pagination': {'page': page.number, 'page_size': options[1],
                     'total': paginator.count, 'pages': paginator.num_pages,
                     'has_next': page.has_next(), 'has_previous': page.has_previous()},

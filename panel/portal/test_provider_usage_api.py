@@ -6,23 +6,23 @@ from django.test import RequestFactory, TestCase, override_settings
 from django.utils import timezone
 from .models import P8SourceBinding
 from .p8_compat import binding_verification_sha256, service_detail
-from .test_p8_compat import P8FixtureMixin
 from .usage_api import service_usage
 
 
 @override_settings(P8_COMPAT_ENABLED=True)
-class ProviderUsageAPITests(P8FixtureMixin, TestCase):
+class ProviderUsageAPITests(TestCase):
     def setUp(self):
-        super().setUp()
         User = get_user_model()
         self.owner = User.objects.create_user('source-owner', is_staff=True)
         self.other = User.objects.create_user('source-other', is_staff=True)
         self.binding = P8SourceBinding.objects.create(source_instance='fixture-p8', source_id='fixture-service',
             owner=self.owner, verified_by=self.other, enabled=True, state='verified',
-            evidence_sha256='e'*64, links_sha256=self.digest, verified_at=timezone.now())
+            evidence_sha256='e'*64, links_sha256='a'*64, verified_at=timezone.now())
         self.binding.verification_sha256 = binding_verification_sha256(self.binding)
         self.binding.save(update_fields=['verification_sha256'])
         self.source = {'source_instance':'fixture-p8', 'source_id':'fixture-service', 'path':'/fixture/provider-usage.json'}
+        # 资源摘要只核来源元数据，不需要构造或消费订阅链接文件。
+        self.config = {'source_instance':'fixture-p8', 'source_id':'fixture-service', 'evidence_sha256':'e'*64}
         context = override_settings(P8_COMPAT_SOURCES={('fixture-p8','fixture-service'):self.config}, PROVIDER_USAGE_SOURCE=self.source)
         context.enable(); self.addCleanup(context.disable)
 

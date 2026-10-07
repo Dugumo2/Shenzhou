@@ -10,6 +10,9 @@ import * as p8 from '../src/p8Delivery.ts'
 import * as display from '../src/display.ts'
 import { boundedRequest } from '../src/billingPending.ts'
 import type { P8Delivery } from '../src/p8Delivery.ts'
+import { useSnapshotRequest } from '../src/useSnapshotRequest.ts'
+import { useSessionIdentity } from '../src/useSessionIdentity.ts'
+import * as resourceSnapshot from '../src/resourceSnapshot.ts'
 
 const require = createRequire(import.meta.url)
 const flush = async () => { for (let i = 0; i < 16; i++) await Promise.resolve(); await vue.nextTick() }
@@ -42,6 +45,9 @@ function mount(relative: string, initialProps: Record<string, unknown>, replacem
     if (name === '../p8Delivery') return p8
     if (name === '../display') return display
     if (name === '../billingPending') return { boundedRequest }
+    if (name === '../useSessionIdentity') return { useSessionIdentity }
+    if (name === '../resourceSnapshot') return resourceSnapshot
+    if (name === '../useSnapshotRequest') return { useSnapshotRequest: (options: any = {}) => useSnapshotRequest({ ...options, read: (path, signal) => (replacements['../api'] as typeof api).request(path, 'GET', undefined, signal) }) }
     if (name.endsWith('.vue')) return { default: name }
     return require(name)
   }
@@ -171,7 +177,7 @@ test('详情P8分支优先于演示；刷新失败与换账号均清除旧服务
   assert.ok(!rendered.some(item => item.type === '../components/DeliveryResources.vue'))
   fail = true
   const reloading = ui.state.load()
-  assert.equal(ui.state.service.value, null)
+  assert.equal(ui.state.service.value?.id, 'service-a')
   await reloading; assert.equal(ui.state.service.value, null)
   fail = false; await ui.state.load()
   auth.session.user.username = 'owner-b'; fail = true; await flush()
@@ -182,7 +188,7 @@ test('详情P8分支优先于演示；刷新失败与换账号均清除旧服务
 test('P8未知期限不被显示为未设置，旧服务保持既有文案', () => {
   const ui = mount('components/ServiceMetrics.vue', { service: { source_type: 'p8', usage: { quality: 'unknown' }, quota_bytes: null, used_bytes: null,
     remaining_bytes: null, next_reset_at: null, expires_at: null, status_label: '待核验' }, lifecycleOnly: true })
-  assert.match(text(ui.render()), /暂不可确认/)
+  assert.match(text(ui.render()), /按资源分别计算/)
   assert.doesNotMatch(text(ui.render()), /暂未设置/)
   ;(ui.props.service as any).source_type = 'membership'
   assert.match(text(ui.render()), /暂未设置/)

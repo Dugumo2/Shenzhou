@@ -23,7 +23,7 @@ watch(() => [props.data.service_id, props.data.period, metric.value], () => { se
     <article class="dashboard-card quota-card" aria-label="套餐额度仪表盘">
       <h3>套餐额度</h3>
       <div class="quota-body">
-        <div class="quota-ring" :class="{unknown: gauge.percent === null}" :style="gaugeStyle" role="img" :aria-label="gaugeLabel + (gauge.percent === null ? '' : ' ' + gauge.percent + '%')">
+        <div class="quota-ring" :class="{unknown: gauge.percent === null}" :style="gaugeStyle" role="img" data-chart="quota-gauge" :aria-label="gaugeLabel + (gauge.percent === null ? '' : ' ' + gauge.percent + '%')">
           <div class="ring-center"><span>{{ gaugeLabel }}</span><strong>{{ gauge.percent === null ? '—' : gauge.percent + '%' }}</strong></div>
         </div>
         <dl class="quota-legend"><div><dt>本期额度</dt><dd>{{ bytes(data.summary.quota_bytes) }}</dd></div><div><dt>{{ gauge.mode === 'current' ? '套餐已用' : '已记录用量' }}</dt><dd>{{ bytes(data.summary.charged_bytes) }}</dd></div><div><dt>剩余流量</dt><dd>{{ bytes(data.summary.remaining_bytes) }}</dd></div></dl>
@@ -33,7 +33,7 @@ watch(() => [props.data.service_id, props.data.period, metric.value], () => { se
     <article class="dashboard-card" aria-label="已确认上传下载构成">
       <h3>已确认传输量</h3><p class="chart-note">本期原始传输量，未乘流量倍率。</p>
       <div class="transfer-total"><strong>{{ transfer ? bytes(transfer.total) : '待核算' }}</strong><span>上传 + 下载</span></div>
-      <div v-if="transfer && !transfer.empty" class="transfer-bar" role="img" :aria-label="'已确认上传占比 ' + transfer.upPercent + '%，下载占比 ' + transfer.downPercent + '%'"><span class="upload" :style="{width:transfer.upPercent+'%'}"></span><span class="download" :style="{width:transfer.downPercent+'%'}"></span></div>
+      <div v-if="transfer && !transfer.empty" class="transfer-bar" role="img" data-chart="transfer-composition" :aria-label="'已确认上传占比 ' + transfer.upPercent + '%，下载占比 ' + transfer.downPercent + '%'"><span class="upload" :style="{width:transfer.upPercent+'%'}"></span><span class="download" :style="{width:transfer.downPercent+'%'}"></span></div>
       <div v-else class="transfer-empty">{{ transfer ? '已确认记录为零' : '等待可靠统计' }}</div>
       <dl class="transfer-legend"><div><dt><i class="upload"></i>上传</dt><dd>{{ bytes(data.summary.upload_bytes) }}</dd></div><div><dt><i class="download"></i>下载</dt><dd>{{ bytes(data.summary.download_bytes) }}</dd></div></dl>
     </article>
@@ -55,13 +55,13 @@ watch(() => [props.data.service_id, props.data.period, metric.value], () => { se
 .dashboard-grid { display:grid; grid-template-columns:1.2fr 1fr; gap:20px; margin:24px 0; }
 .dashboard-card { border:1px solid #e3e9f2; border-radius:14px; padding:22px; background:linear-gradient(145deg,#f8faff,#fff); min-width:0; }
 .dashboard-card h3,.history-chart h3 { margin:0 0 16px; font-size:17px; }
-.quota-body { display:flex; align-items:center; gap:28px; }
+.quota-body { display:flex; align-items:center; flex-wrap:wrap; gap:28px; }
 .quota-ring { width:172px; height:172px; border-radius:50%; display:grid; place-items:center; flex-shrink:0; background:#e8edf5; }
 .quota-ring.unknown { background:repeating-conic-gradient(#d8e0ed 0deg 9deg,transparent 9deg 15deg); }
 .ring-center { width:134px; height:134px; border-radius:50%; background:#fcfdff; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:7px; }
 .ring-center span,.chart-note,.history-chart figcaption { color:#63738b; font-size:12px; line-height:1.7; }
 .ring-center strong { font-size:30px; color:#213652; }
-.quota-legend { display:grid; gap:13px; margin:0; }
+.quota-legend { display:grid; gap:13px; margin:0; min-width:0; overflow-wrap:anywhere; }
 .quota-legend dt,.transfer-legend dt { font-size:12px; color:#687887; }
 .quota-legend dd { font-size:19px; font-weight:600; margin:4px 0 0; }
 .chart-note { margin:12px 0 0; }
