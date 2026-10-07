@@ -204,6 +204,9 @@ def _record_usage_atomic(identity_id, server_id, epoch, sequence, upload_bytes, 
     if identity.state == 'candidate':
         raise ValidationError('未开通身份不能写入计量')
     record = Entitlement.objects.select_for_update().get(pk=identity.subscription.entitlement_id)
+    from .models import IngressUsageSample
+    if IngressUsageSample.objects.filter(identity=identity).exists():
+        raise ValidationError('该身份已经切换区间采样路径，禁止旧路径重复入账')
     # 先按权威现在推进；历史或超前样本只能查询已经确定的边界。
     current_cycle(record)
     cycle = current_cycle(record, observed_at)

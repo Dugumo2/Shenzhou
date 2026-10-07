@@ -185,11 +185,12 @@ test('详情P8分支优先于演示；刷新失败与换账号均清除旧服务
   ui.unmount()
 })
 
-test('P8未知期限不被显示为未设置，旧服务保持既有文案', () => {
+test('P8和旧服务均展示统一套餐期限，不沿用采购资源日期', () => {
   const ui = mount('components/ServiceMetrics.vue', { service: { source_type: 'p8', usage: { quality: 'unknown' }, quota_bytes: null, used_bytes: null,
     remaining_bytes: null, next_reset_at: null, expires_at: null, status_label: '待核验' }, lifecycleOnly: true })
-  assert.match(text(ui.render()), /按资源分别计算/)
-  assert.doesNotMatch(text(ui.render()), /暂未设置/)
+  assert.match(text(ui.render()), /下次流量重置/)
+  assert.match(text(ui.render()), /到期时间/)
+  assert.doesNotMatch(text(ui.render()), /按资源分别计算/)
   ;(ui.props.service as any).source_type = 'membership'
   assert.match(text(ui.render()), /暂未设置/)
   ui.unmount()
@@ -217,5 +218,26 @@ test('旧会员地址别名加载后标题、用量和连接均使用同一正�
   const consuming = nodes(rendered).filter(item => ['../components/UsageOverview.vue', '../components/P8DeliveryResources.vue'].includes(item.type))
   assert.equal(consuming.length, 3)
   assert.ok(consuming.every(item => item.props['service-id'] === canonical))
+  ui.unmount()
+})
+
+test('用量接口初次失败保留已知套餐图数据，后续撤权同时清空父服务', async()=>{
+  let status=0
+  const service={id:'service-a',source_type:'p8',quota_bytes:'100000000000',used_bytes:null,remaining_bytes:null,quota_state:'applied',next_reset_at:null,expires_at:null,usage:{quality:'unknown',updated_at:null,message:''},delivery:{download_url:null},clients:[]}
+  const ui=mount('pages/ServicePage.vue',{}, {
+    '../auth':{auth:vue.reactive({session:{authenticated:true,user:{username:'owner-a'},environment:{is_demo:false}}})},
+    'vue-router':{useRoute:()=>vue.reactive({params:{id:'service-a'}})},
+    '../api':{...api,request:async(path:string)=>{
+      if(path==='/catalog/clients')return {items:[]}
+      if(path.includes('/usage?'))throw new api.ApiError(status,'READ_FAILED','读取失败')
+      return service
+    }}
+  })
+  await flush()
+  assert.equal(ui.state.summarySnapshot.value.summary.quota_bytes,'100000000000')
+  assert.equal(ui.state.summarySnapshot.value.summary.remaining_bytes,null)
+  assert.equal(ui.state.service.value.id,'service-a')
+  status=403;await ui.state.load();await flush()
+  assert.equal(ui.state.service.value,null);assert.equal(ui.state.summarySnapshot.value,null)
   ui.unmount()
 })

@@ -528,7 +528,10 @@ class BillingPlanMigrationTests(TransactionTestCase):
             upgraded = executor.loader.project_state(latest).apps
             self.assertEqual(list(upgraded.get_model('portal', 'Entitlement').objects.values()), before_record)
             self.assertEqual(list(upgraded.get_model('portal', 'BillingCycle').objects.values()), before_cycles)
-            self.assertEqual(list(upgraded.get_model('portal', 'UsageLedger').objects.values()), before_ledger)
+            upgraded_ledger = upgraded.get_model('portal', 'UsageLedger')
+            self.assertEqual(list(upgraded_ledger.objects.values(*before_ledger[0].keys())), before_ledger)
+            self.assertEqual(list(upgraded_ledger.objects.values_list(
+                'interval_start', 'interval_end', 'grant_rate_version_id')), [(None, None, None)])
             self.assertEqual(upgraded.get_model('portal', 'BillingPlan').objects.count(), 0)
             self.assertEqual(upgraded.get_model('portal', 'BillingPlanRevision').objects.count(), 0)
         finally:

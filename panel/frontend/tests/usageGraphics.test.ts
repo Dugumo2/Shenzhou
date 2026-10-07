@@ -69,7 +69,7 @@ async function renderEntry(entry: string, props: Record<string, unknown>, respon
     return render
   } }
   const app = vue.createSSRApp(wrapper, props)
-  for (const name of ['el-button', 'el-alert', 'el-skeleton', 'el-tag', 'el-radio-group', 'el-radio-button', 'el-tabs', 'el-tab-pane', 'el-progress']) {
+  for (const name of ['el-button', 'el-alert', 'el-skeleton', 'el-tag', 'el-radio-group', 'el-radio-button', 'el-tabs', 'el-tab-pane', 'el-progress', 'el-drawer']) {
     app.component(name, { setup(_props: unknown, { slots }: any) { return () => vue.h('div', slots.default?.()) } })
   }
   app.component('RouterLink', { props: ['to'], setup(props: any, { slots }: any) { return () => vue.h('a', { href: props.to }, slots.default?.()) } })
@@ -78,84 +78,104 @@ async function renderEntry(entry: string, props: Record<string, unknown>, respon
 }
 
 async function renderOverview(data: UsageOverviewData, summaryOnly = false) {
-  const { html, requests } = await renderEntry('components/UsageOverview.vue', { serviceId: data.service_id, summaryOnly }, { '/me/services/graphics-fixture/usage?period=current': data })
-  assert.deepEqual(requests, ['/me/services/graphics-fixture/usage?period=current'])
+  const { html, requests } = await renderEntry('components/UsageOverview.vue', { serviceId: data.service_id, summaryOnly }, { '/me/services/graphics-fixture/usage?period=7d': data })
+  assert.deepEqual(requests, ['/me/services/graphics-fixture/usage?period=7d'])
   return html
 }
 
-test('实际概览收到来源响应后保留每项资源圆环、已有上下行构成及资源日期', async () => {
-  const data = overview()
-  data.source_type = 'p8'
-  data.provider_usage = { schema_version: 2, generated_at: data.generated_at, meters: [meter(), meter({ id: 'resource-two', label: '资源乙', scope: 'server', source_kind: 'official', upload_bytes: null, download_bytes: null })] }
-  for (const compact of [true, false]) {
-    const html = await renderOverview(data, compact)
-    assert.equal((html.match(/data-chart="quota-gauge"/g) || []).length, 2)
-    assert.equal((html.match(/data-chart="transfer-composition"/g) || []).length, 1)
-    for (const value of ['资源甲', '资源乙', '400 GB', '73 GB', '327 GB', '估算', '官方', '下次重置', '到期日期', '最后更新', '2027-01-19']) assert.ok(html.includes(value), value)
-    assert.doesNotMatch(html, /套餐额度|class="history-chart"|class="actual-bar/)
-    if (!compact) assert.match(html, /尚未提供可用于绘制趋势的历史采样/)
-  }
+function temporal(data: UsageOverviewData, period: '7d' | 'month' | 'year' = '7d') {
+  const values = period === 'year' ? [null,null,null,null,null,null,null,null,'60000000000','40000000000',null,null] : ['0','4000000000','6000000000','0','10000000000','8000000000','12000000000']
+  data.period = period
+  data.timeseries = { service_id:data.service_id, summary_revision:'r1', time_zone:'Asia/Shanghai', period, granularity:period==='year'?'month':'day', range_start:'2026-10-01T00:00:00+08:00', range_end:'2026-10-07T15:00:00+08:00', as_of:'2026-10-07T15:00:00+08:00', totals:{ state:period==='year'?'partial':'complete', charged_bytes:period==='year'?'100000000000':'40000000000',upload_bytes:'12000000000',download_bytes:'18000000000',unallocated_charged_bytes:'0' }, buckets:values.map((value,index)=>({ start:period==='year'?`2026-${String(index+1).padStart(2,'0')}-01T00:00:00+08:00`:`2026-10-${String(index+1).padStart(2,'0')}T00:00:00+08:00`,end:'2026-10-08T00:00:00+08:00',state:value===null?(index>9?'future':'missing'):'complete',is_open:index===(period==='year'?9:6),covered_through:null,charged_bytes:value,upload_bytes:value,download_bytes:value })),unallocated:[],unallocated_next_cursor:null,boundary_pending_count:0,message_code:null }
+  return data
+}
+
+test('用户概览忽略旧provider原件，仍保留一份套餐圆环和原始上下行构成', async () => {
+  const data = temporal(overview()); data.source_type='p8'
+  data.provider_usage={schema_version:2,generated_at:data.generated_at,meters:[meter(),meter({id:'two',label:'资源乙'})]}
+  const html=await renderOverview(data,true)
+  assert.equal((html.match(/data-chart="quota-gauge"/g)||[]).length,1)
+  assert.equal((html.match(/data-chart="transfer-composition"/g)||[]).length,1)
+  assert.match(html,/100 GB/); assert.match(html,/30 GB/); assert.match(html,/70 GB/)
+  assert.doesNotMatch(html,/资源甲|资源乙|统计详情|details|400 GB/)
 })
 
-test('实际个人套餐概览保留额度和传输图，完整分区保留真实记录图及详情入口', async () => {
-  const data = overview(), compact = await renderOverview(data, true), full = await renderOverview(data)
-  for (const html of [compact, full]) {
-    assert.match(html, /data-chart="quota-gauge"/)
-    assert.match(html, /data-chart="transfer-composition"/)
-    assert.match(html, /当前已用占比 30%/)
-    assert.match(html, /本期原始传输量，未乘流量倍率/)
-  }
-  assert.doesNotMatch(compact, /class="history-chart"/)
-  assert.match(full, /class="history-chart"/)
-  assert.match(full, /查看详细统计/)
-  assert.match(full, /2026-10-02：暂无已确认记录，不代表零流量/)
-  assert.match(full, /2026-10-03：0 GB/)
-  assert.match(full, /下次流量重置/)
-  assert.match(full, /最后采集/)
+test('用量真实组件只有时间柱图和范围总计，已测零与缺失及未来分别表达', async () => {
+  const data=temporal(overview()), html=await renderOverview(data)
+  assert.match(html,/data-chart="usage-timeseries"/)
+  assert.doesNotMatch(html,/data-chart="quota-gauge"|data-chart="transfer-composition"/)
+  assert.equal((html.match(/data-state="complete"/g)||[]).length,7)
+  assert.match(html,/2026-10-01：0 GB/); assert.match(html,/40 GB/); assert.match(html,/查看线路使用明细/)
+  const yearly=temporal(overview(),'year')
+  const year=(await renderEntry('components/UsageTimeline.vue',{data:yearly,period:'year'},{})).html
+  assert.equal((year.match(/data-state=/g)||[]).length,12)
+  assert.equal((year.match(/data-state="missing"/g)||[]).length,8)
+  assert.equal((year.match(/data-state="future"/g)||[]).length,2)
+  assert.match(year,/所选范围已记录/); assert.match(year,/100 GB/)
+  assert.doesNotMatch(year,/所选范围合计/)
 })
 
-test('实际来源错误和缺失保留异常与已知图形，未知资源不伪造百分比或零值', async () => {
-  const data = overview()
-  data.provider_usage = { schema_version: 2, generated_at: data.generated_at, meters: [meter({ quality: 'error', alerts: [{ code: 'source_error', severity: 'error', message: '来源暂时无法更新' }] })] }
-  const failed = await renderOverview(data)
-  assert.match(failed, /来源暂时无法更新/)
-  assert.match(failed, /data-chart="quota-gauge"/)
-  assert.match(failed, /data-chart="transfer-composition"/)
-  assert.match(failed, /上次记录剩余/)
-  data.provider_usage.meters = [meter({ quality: 'missing', quota_bytes: null, used_bytes: null, remaining_bytes: null, upload_bytes: null, download_bytes: null, observed_at: null, expires_at: null })]
-  const missing = await renderOverview(data)
-  assert.match(missing, /暂无可计算比例/)
-  assert.doesNotMatch(missing, /data-chart="transfer-composition"|0 GB|conic-gradient\(/)
+test('未知历史保留完整日历图，不用旧created_at记录伪造日期用量',async()=>{
+  const data=overview(),html=await renderOverview(data)
+  assert.match(html,/data-chart="usage-timeseries"/)
+  assert.equal((html.match(/data-state="missing"/g)||[]).length,7)
+  assert.doesNotMatch(html,/class="actual-bar|class="quota-ring/)
+  const compact=await renderOverview(data,true)
+  assert.match(compact,/data-chart="quota-gauge"/);assert.match(compact,/data-chart="transfer-composition"/)
 })
 
-test('真实服务父页面共享一份用量读取，受控概览与流量分区均保留来源图形', async () => {
-  const data = overview()
-  data.source_type = 'p8'
-  data.provider_usage = { schema_version: 2, generated_at: data.generated_at, meters: [meter(), meter({ id: 'resource-two', label: '资源乙', source_kind: 'official', scope: 'server', quota_bytes: '2000000000000', used_bytes: '170000000000', remaining_bytes: '1830000000000', upload_bytes: null, download_bytes: null })] }
-  const service = { id: data.service_id, name: '神舟云', source_type: 'p8', provider_usage: data.provider_usage,
-    quota_bytes: null, used_bytes: null, raw_bytes: null, remaining_bytes: null, next_reset_at: null, expires_at: null,
-    state: 'active', enabled: true, status_label: '使用中', business_state: 'active', quota_state: 'unknown',
-    usage: { quality: 'unknown', updated_at: null, message: '没有个人套餐账本' },
-    delivery: { state: 'unknown', message: '', download_url: null } }
-  const responses = {
-    '/me/services/graphics-fixture': service,
-    '/me/services/graphics-fixture/usage?period=current': data,
-    '/catalog/clients': { items: [] },
-    '/me/services': { items: [service], compatibility: { state: 'ready', message: null } },
-  }
-  const detail = await renderEntry('pages/ServicePage.vue', {}, responses)
-  assert.deepEqual([...detail.requests].sort(), ['/catalog/clients', '/me/services/graphics-fixture', '/me/services/graphics-fixture/usage?period=current'])
-  // 标签页宿主展开两个真实 slot，分别核对概览和完整用量分区的受控挂载。
-  assert.equal((detail.html.match(/data-chart="quota-gauge"/g) || []).length, 4)
-  assert.equal((detail.html.match(/data-chart="transfer-composition"/g) || []).length, 2)
-  assert.equal((detail.html.match(/class="refresh-control/g) || []).length, 1)
-  assert.match(detail.html, /尚未提供可用于绘制趋势的历史采样/)
-  assert.match(detail.html, /按资源分别计算/)
-  const list = await renderEntry('pages/ServicesPage.vue', {}, responses)
-  assert.deepEqual(list.requests, ['/me/services'])
-  assert.match(list.html, /href="\/services\/graphics-fixture"/)
-  for (const html of [list.html, detail.html]) {
-    for (const value of ['资源甲', '资源乙', '400 GB', '73 GB', '327 GB', '2,000 GB', '170 GB', '1,830 GB', '2027-01-19', '估算', '官方']) assert.ok(html.includes(value), value)
-    assert.doesNotMatch(html, /暂无可靠统计|2,400 GB|243 GB/)
-  }
+test('真实服务父页与列表使用统一P8套餐，保留固定三分区、软件向导与一次用量读取',async()=>{
+  const data=temporal(overview());data.source_type='p8';data.provider_usage={schema_version:2,generated_at:data.generated_at,meters:[meter()]}
+  const service={id:data.service_id,name:'神舟云',source_type:'p8',provider_usage:data.provider_usage,quota_bytes:'100000000000',used_bytes:'30000000000',raw_bytes:'30000000000',remaining_bytes:'70000000000',next_reset_at:'2026-11-01T00:00:00+08:00',expires_at:'2027-01-19T00:00:00+08:00',state:'active',enabled:true,status_label:'使用中',business_state:'active',quota_state:'applied',usage:{quality:'measured',updated_at:data.generated_at,message:''},delivery:{state:'unknown',message:'',download_url:null}}
+  const responses={'/me/services/graphics-fixture':service,'/me/services/graphics-fixture/usage?period=7d':data,'/catalog/clients':{items:[]},'/me/services':{items:[service],compatibility:{state:'ready',message:null}}}
+  const detail=await renderEntry('pages/ServicePage.vue',{},responses)
+  assert.deepEqual([...detail.requests].sort(),['/catalog/clients','/me/services/graphics-fixture','/me/services/graphics-fixture/usage?period=7d'])
+  assert.equal((detail.html.match(/data-chart="quota-gauge"/g)||[]).length,1)
+  assert.equal((detail.html.match(/data-chart="usage-timeseries"/g)||[]).length,1)
+  assert.equal((detail.html.match(/data-chart="transfer-composition"/g)||[]).length,1)
+  assert.equal((detail.html.match(/class="refresh-control/g)||[]).length,1)
+  assert.equal((detail.html.match(/下次流量重置/g)||[]).length,1)
+  for(const text of ['本期流量周期','到期时间','服务状态'])assert.ok(detail.html.includes(text),text)
+  for(const text of ['服务概览','流量用量','连接设置','手机','电脑','路由器'])assert.ok(detail.html.includes(text),text)
+  const list=await renderEntry('pages/ServicesPage.vue',{},responses)
+  assert.match(list.html,/href="\/services\/graphics-fixture"/)
+  for(const html of [detail.html,list.html]){for(const text of ['100 GB','30 GB','70 GB','2027'])assert.ok(html.includes(text),text);assert.doesNotMatch(html,/资源甲|按资源分别计算|400 GB/)}
+})
+
+test('线路明细沿用所选范围与水位，倍率分段保留且不能显示旧月份数字',async()=>{
+  const data=temporal(overview(),'year'),t=data.timeseries!
+  data.line_usage={service_id:data.service_id,time_zone:'Asia/Shanghai',period:'year',range_start:t.range_start,range_end:t.range_end,as_of:t.as_of,summary_revision:'r1',totals:t.totals,boundary_pending_count:0,message_code:null,lines:[{line_id:'line-public',line_name:'本人授权线路',node_name:'节点甲',multiplier:'2',effective_from:'2026-09-01T00:00:00+08:00',effective_to:'2026-10-01T00:00:00+08:00',upload_bytes:'12000000000',download_bytes:'18000000000',charged_bytes:'60000000000'}]}
+  const correct=(await renderEntry('components/UsageTimeline.vue',{data,period:'year'},{})).html
+  assert.match(correct,/本人授权线路/);assert.match(correct,/×2/);assert.match(correct,/60 GB/)
+  data.line_usage.period='month'
+  const wrong=(await renderEntry('components/UsageTimeline.vue',{data,period:'year'},{})).html
+  assert.doesNotMatch(wrong,/本人授权线路|×2/);assert.match(wrong,/暂无可确认的线路明细/)
+  data.line_usage.period='year';data.line_usage.summary_revision='older'
+  const stale=(await renderEntry('components/UsageTimeline.vue',{data,period:'year'},{})).html
+  assert.doesNotMatch(stale,/本人授权线路|×2/)
+})
+
+test('月中重置后概览本期与自然月范围各读服务端值，未分桶仅计入总量一次',async()=>{
+  const data=temporal(overview(),'month');data.summary.charged_bytes='10000000000';data.summary.remaining_bytes='90000000000'
+  data.timeseries!.totals.charged_bytes='42000000000';data.timeseries!.totals.unallocated_charged_bytes='2000000000'
+  data.timeseries!.unallocated=[{starts_at:'2026-10-06T23:59:00+08:00',ends_at:'2026-10-07T00:01:00+08:00',charged_bytes:'2000000000',upload_bytes:'0',download_bytes:'2000000000'}]
+  const summary=await renderOverview(data,true),month=(await renderEntry('components/UsageTimeline.vue',{data,period:'month'},{})).html
+  assert.match(summary,/10 GB/);assert.match(month,/42 GB/);assert.match(month,/另有 2 GB 已计入范围合计/)
+  assert.doesNotMatch(month,/44 GB/)
+})
+
+test('真实时间图与线路明细将末尾待采样显示为持续更新，真实缺口仍明确提示',async()=>{
+  const data=temporal(overview()),t=data.timeseries!
+  t.totals.state='partial';t.message_code='sampling_pending'
+  data.line_usage={service_id:data.service_id,time_zone:'Asia/Shanghai',period:'7d',range_start:t.range_start,range_end:t.range_end,as_of:t.as_of,summary_revision:'r1',totals:t.totals,boundary_pending_count:0,message_code:'sampling_pending',lines:[{line_id:'line-public',line_name:'本人授权线路',node_name:'节点甲',multiplier:'1',effective_from:'2026-10-01T00:00:00+08:00',effective_to:null,upload_bytes:'12000000000',download_bytes:'18000000000',charged_bytes:'40000000000'}]}
+  const pending=(await renderEntry('components/UsageTimeline.vue',{data,period:'7d'},{})).html
+  assert.match(pending,/当前时段持续更新，显示最近采样记录。/)
+  assert.match(pending,/所选范围已记录/)
+  assert.match(pending,/40 GB/)
+  assert.doesNotMatch(pending,/部分时段缺少记录|缺失时段未补齐|所选范围合计/)
+  t.message_code='partial_coverage';data.line_usage.message_code='partial_coverage'
+  const gap=(await renderEntry('components/UsageTimeline.vue',{data,period:'7d'},{})).html
+  assert.match(gap,/部分时段缺少记录/)
+  assert.match(gap,/缺失时段未补齐/)
+  assert.doesNotMatch(gap,/当前时段持续更新/)
 })

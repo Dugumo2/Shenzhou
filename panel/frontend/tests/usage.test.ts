@@ -91,7 +91,7 @@ test('真实概览切换服务后清除旧统计，迟到响应不能串到新�
   const first = deferred<UsageOverviewData>(), second = deferred<UsageOverviewData>(), paths: string[] = []
   const ui = mount(async path => { paths.push(path); return path.includes('/service-a/') ? first.promise : second.promise })
   await flush()
-  assert.deepEqual(paths, ['/me/services/service-a/usage?period=current'])
+  assert.deepEqual(paths, ['/me/services/service-a/usage?period=7d'])
   ui.props.serviceId = 'service-b'; await flush()
   assert.equal(ui.state.data.value, null)
   const result = overview(); result.service_id = 'service-b'; second.resolve(result); await flush()
@@ -103,15 +103,15 @@ test('真实概览切换服务后清除旧统计，迟到响应不能串到新�
 
 test('真实概览刷新去重并保留已采样图形，网络失败保旧且不改采样时间', async () => {
   const pending = deferred<UsageOverviewData>(), paths: string[] = []
-  const ui = mount(async path => { paths.push(path); return paths.length > 2 ? pending.promise : { ...overview(), period: path.includes('7d') ? '7d' : 'current' } })
-  await flush(); assert.equal(ui.state.percentage.value, 30)
-  ui.state.period.value = '7d'; await flush()
-  assert.equal(ui.state.data.value.period, '7d')
-  assert.match(paths[1], /period=7d$/)
+  const ui = mount(async path => { paths.push(path); return paths.length > 2 ? pending.promise : { ...overview(), period: path.includes('month') ? 'month' : '7d' } })
+  await flush(); assert.equal(reliableUsagePercent(ui.state.data.value), 30)
+  ui.state.period.value = 'month'; await flush()
+  assert.equal(ui.state.data.value.period, 'month')
+  assert.match(paths[1], /period=month$/)
   const previous = ui.state.data.value, readAt = ui.state.reader.lastReadAt.value
   ui.props.refreshKey++; await flush()
   assert.equal(ui.state.data.value, previous)
-  assert.equal(ui.state.percentage.value, 30)
+  assert.equal(reliableUsagePercent(ui.state.data.value), 30)
   ui.props.refreshKey++; await flush()
   assert.equal(paths.length, 3)
   pending.reject(new api.ApiError(0, 'NETWORK_ERROR', '网络暂不可用')); await flush()
@@ -126,9 +126,6 @@ test('真实概览刷新去重并保留已采样图形，网络失败保旧且�
 test('真实概览卸载后忽略迟到失败，未知与微量字节不会显示假零', async () => {
   const pending = deferred<UsageOverviewData>()
   const ui = mount(async () => pending.promise)
-  assert.equal(ui.state.bytes(null), '暂无可靠统计')
-  assert.equal(ui.state.bytes('1'), '< 0.01 GB')
-  assert.equal(ui.state.bytes('0'), '0 GB')
   await flush()
   ui.unmount(); pending.reject(new api.ApiError(0, 'NETWORK_ERROR', '迟到失败')); await flush()
   assert.equal(ui.state.error.value, '')
@@ -142,7 +139,7 @@ test('真实概览遇到401、403、404撤除缓存与图形数据，不套用�
     await flush(); assert.ok(ui.state.data.value)
     ui.props.refreshKey++; await flush()
     assert.equal(ui.state.data.value, null)
-    assert.equal(ui.state.percentage.value, null)
+    assert.equal(ui.state.data.value, null)
     assert.equal(ui.state.reader.lastReadAt.value, null)
     assert.equal(ui.state.error.value, '服务不可访问')
     ui.unmount()
@@ -170,10 +167,21 @@ test('受控概览只消费父快照并发送周期变化，不重复发请求�
   assert.equal(reads, 0)
   assert.equal(ui.state.data.value, ui.props.snapshot)
   assert.equal(ui.state.busy.value, true)
-  ui.state.period.value = '7d'; await flush()
-  assert.deepEqual(ui.events, [['period-change', '7d']])
+  ui.state.period.value = 'month'; await flush()
+  assert.deepEqual(ui.events, [['period-change', 'month']])
   ui.props.loading = false; ui.props.loadError = '网络暂不可用'; await flush()
   assert.ok(ui.state.data.value)
   assert.equal(ui.state.error.value, '网络暂不可用')
+  ui.unmount()
+})
+
+test('时间范围快速切换取消旧请求，年度图金额与明细只能接收同次年度响应',async()=>{
+  const month=deferred<UsageOverviewData>(),year=deferred<UsageOverviewData>(),paths:string[]=[]
+  const ui=mount(async path=>{paths.push(path);return path.endsWith('month')?month.promise:path.endsWith('year')?year.promise:overview()})
+  await flush();ui.state.period.value='month';await flush();assert.equal(ui.state.data.value,null)
+  ui.state.period.value='year';await flush();assert.equal(ui.state.data.value,null)
+  const yearly={...overview(),period:'year' as const};year.resolve(yearly);await flush()
+  month.resolve({...overview(),period:'month'});await flush()
+  assert.equal(ui.state.data.value.period,'year');assert.equal(paths.length,3)
   ui.unmount()
 })

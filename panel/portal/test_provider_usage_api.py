@@ -34,7 +34,13 @@ class ProviderUsageAPITests(TestCase):
     def test_admin_owner_gets_separate_source_statistics_without_filling_quota(self):
         with patch('portal.resource_usage_view.read_resource_usage_view', return_value={'schema_version':2,'meters':[]}) as read:
             result = json.loads(self.response().content)['data']
-        self.assertEqual(result['provider_usage']['schema_version'], 2)
+            self.assertNotIn('provider_usage', result)
+            read.assert_not_called()
+            from .admin_api import resource_usage
+            request = RequestFactory().get('/api/v1/admin/resource-usage')
+            request.user = self.owner
+            resources = json.loads(resource_usage(request).content)['data']
+        self.assertEqual(resources['items'][0]['provider_usage']['schema_version'], 2)
         read.assert_called_once_with(self.source['path'])
         self.assertIsNone(result['summary']['remaining_bytes'])
         self.assertIsNone(result['summary']['charged_bytes'])

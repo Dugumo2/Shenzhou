@@ -42,6 +42,21 @@ def user_projection(user, counts=None):
 
 
 @endpoint(staff=True)
+def resource_usage(request):
+    """仅管理员资源区读取已采集采购统计，不把它作为套餐额度返回。"""
+    from .service_projection import p8_records, valid_p8
+    from .service_usage_source import ServiceUsageSource
+    source = ServiceUsageSource(request.user)
+    items = []
+    for record in p8_records().filter(owner=request.user):
+        if valid_p8(record):
+            value = source.read(record, 'p8', {'state': 'verified'})
+            if value is not None:
+                items.append({'service_id': str(record.public_id), 'provider_usage': value})
+    return success({'items': items})
+
+
+@endpoint(staff=True)
 def users(request):
     options, failure = page_options(request)
     if failure is not None:

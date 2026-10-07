@@ -381,6 +381,10 @@ class UsageLedger(models.Model):
     upload_delta = models.PositiveBigIntegerField()
     download_delta = models.PositiveBigIntegerField()
     rate_version = models.ForeignKey('LineRateVersion', null=True, blank=True, on_delete=models.PROTECT)
+    grant_rate_version = models.ForeignKey('ServiceRateVersion', null=True, blank=True, on_delete=models.PROTECT)
+    # 旧流水不回填发生区间；新采样有边界证据时才填写。
+    interval_start = models.DateTimeField(null=True, blank=True)
+    interval_end = models.DateTimeField(null=True, blank=True)
     weighted_bytes = models.PositiveBigIntegerField(null=True, blank=True)
     quality = models.CharField(max_length=24, default='legacy_unknown')
     observed_at = models.DateTimeField()
@@ -424,6 +428,60 @@ class LineRateVersion(models.Model):
         ordering = ['effective_at', 'pk']
         constraints = [models.UniqueConstraint(fields=['line', 'effective_at'], name='unique_line_rate_time'),
             models.CheckConstraint(condition=models.Q(multiplier__gt=0), name='positive_line_rate')]
+
+
+class ServiceRateVersion(models.Model):
+    """服务在指定线路入口的授权倍率；旧全局线路倍率保持独立。"""
+    entitlement = models.ForeignKey(Entitlement, on_delete=models.PROTECT, related_name='grant_rates')
+    line = models.ForeignKey(Line, on_delete=models.PROTECT)
+    ingress = models.ForeignKey(Ingress, on_delete=models.PROTECT)
+    multiplier = models.DecimalField(max_digits=12, decimal_places=6)
+    effective_at = models.DateTimeField()
+    actor = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
+    reason = models.CharField(max_length=240)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def save(self, *args, **kwargs):
+        if self.pk and type(self).objects.filter(pk=self.pk).exists():
+            from django.core.exceptions import ValidationError
+            raise ValidationError('授权倍率版本不可覆盖；请追加新版本')
+        super().save(*args, **kwargs)
+
+    class Meta:
+        ordering = ['effective_at', 'pk']
+        constraints = [
+            models.UniqueConstraint(fields=['entitlement', 'line', 'ingress', 'effective_at'], name='unique_service_rate_time'),
+            models.CheckConstraint(condition=models.Q(multiplier__gt=0), name='positive_service_rate'),
+        ]
+
+
+class IngressUsageSample(models.Model):
+    """入口累计样本和未计费原因持久保存；基线、未知与实测零分开。"""
+    identity = models.ForeignKey(NodeIdentity, on_delete=models.PROTECT, related_name='ingress_samples')
+    entitlement = models.ForeignKey(Entitlement, on_delete=models.PROTECT, related_name='ingress_samples')
+    # 冻结非秘密归属锚，防止可变资料把旧累计量套到新入口或服务。
+    server = models.ForeignKey(Server, on_delete=models.PROTECT)
+    line = models.ForeignKey(Line, on_delete=models.PROTECT)
+    ingress = models.ForeignKey(Ingress, on_delete=models.PROTECT)
+    subscription = models.ForeignKey(DeviceSubscription, on_delete=models.PROTECT)
+    identity_generation = models.PositiveIntegerField()
+    core_instance = models.ForeignKey(CoreInstance, on_delete=models.PROTECT)
+    epoch = models.CharField(max_length=80)
+    sequence = models.PositiveBigIntegerField()
+    upload_bytes = models.PositiveBigIntegerField()
+    download_bytes = models.PositiveBigIntegerField()
+    observed_at = models.DateTimeField()
+    received_at = models.DateTimeField(auto_now_add=True)
+    interval_start = models.DateTimeField(null=True, blank=True)
+    fingerprint = models.CharField(max_length=64)
+    coverage_verified = models.BooleanField(default=False)
+    status = models.CharField(max_length=16, choices=[
+        ('baseline', '起始基线'), ('accepted', '区间已入账'), ('gap', '区间缺口'), ('late', '迟到样本')])
+    reason_code = models.CharField(max_length=40, blank=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=['identity', 'epoch', 'sequence'], name='unique_ingress_sample')]
+        indexes = [models.Index(fields=['entitlement', 'observed_at'], name='ingress_service_time')]
 
 
 class CapacityPool(models.Model):

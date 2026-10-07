@@ -52,24 +52,33 @@ class ServiceUsageSourceTests(TestCase):
                 self.get('admin/users/' + str(self.owner.pk))['services'][0],
                 self.get('me/services/' + identifier + '/usage')]
 
+    def resource(self):
+        rows = self.get('admin/resource-usage')['items']
+        return rows[0] if rows else {}
+
     def test_all_entrypoints_preserve_same_sources_scope_quality_and_sample_times(self):
         with patch('portal.resource_usage_view.read_resource_usage_view', return_value=self.dto) as read, \
                 patch('portal.p8_compat._read_private_file') as secret:
             entries = self.projections()
-        self.assertEqual(read.call_count, 5)
+        read.assert_not_called()
         secret.assert_not_called()
-        source_key = entries[0]['provider_usage']['source_key']
+        for entry in entries:
+            self.assertNotIn('provider_usage', entry)
+        with patch('portal.resource_usage_view.read_resource_usage_view', return_value=self.dto) as read:
+            resource = self.resource()
+        read.assert_called_once()
+        source_key = resource['provider_usage']['source_key']
         self.assertRegex(source_key, r'^[a-f0-9]{64}$')
         self.assertNotIn('source_key', self.dto)
         for entry in entries:
-            self.assertEqual(entry['provider_usage'], {**self.dto, 'source_key': source_key})
             quota = entry.get('summary', entry)
             for key in ('quota_bytes', 'remaining_bytes', 'next_reset_at'):
                 self.assertIsNone(quota[key])
             if 'summary' not in entry:
                 self.assertIsNone(entry['used_bytes'])
                 self.assertIsNone(entry['expires_at'])
-        home, bwg = entries[0]['provider_usage']['meters']
+        self.assertEqual(resource['provider_usage'], {**self.dto, 'source_key': source_key})
+        home, bwg = resource['provider_usage']['meters']
         self.assertEqual((home['scope'], bwg['scope']), ('external_node', 'server'))
         self.assertEqual((home['used_bytes'], bwg['used_bytes']), ('300', '1000'))
         self.assertEqual((home['expires_on'], bwg['expires_on']), ('2027-01-19', None))
@@ -80,8 +89,8 @@ class ServiceUsageSourceTests(TestCase):
             kwargs = {'side_effect': raw} if isinstance(raw, Exception) else {'return_value': raw}
             with self.subTest(raw=type(raw).__name__), \
                     patch('portal.resource_usage_view._private_read', **kwargs) as read:
-                entries = self.projections()
-            self.assertEqual(read.call_count, 5)
+                entries = [self.resource()]
+            self.assertEqual(read.call_count, 1)
             for entry in entries:
                 source = entry['provider_usage']
                 self.assertEqual(source['meters'], [])
@@ -92,7 +101,7 @@ class ServiceUsageSourceTests(TestCase):
         for meter in stale['meters']:
             meter['expires_at'] = (self.now - timedelta(days=1)).isoformat()
         with patch('portal.resource_usage_view._private_read', return_value=json.dumps(stale).encode()):
-            entries = self.projections()
+            entries = [self.resource()]
         for entry in entries:
             for actual, original in zip(entry['provider_usage']['meters'], stale['meters']):
                 self.assertEqual(actual['quality'], 'stale')
@@ -107,6 +116,7 @@ class ServiceUsageSourceTests(TestCase):
             user = self.get('admin/users/' + str(self.owner.pk))['services'][0]
             self.assertNotIn('provider_usage', admin)
             self.assertNotIn('provider_usage', user)
+            self.assertEqual(self.get('admin/resource-usage')['items'], [])
             for suffix in ('', '/usage'):
                 response = self.client.get('/api/v1/me/services/' + str(self.binding.public_id) + suffix)
                 self.assertEqual(response.status_code, 404)
@@ -116,6 +126,7 @@ class ServiceUsageSourceTests(TestCase):
         self.owner.is_staff = False
         self.owner.save(update_fields=['is_staff'])
         with patch('portal.resource_usage_view.read_resource_usage_view') as read:
+            self.assertEqual(self.client.get('/api/v1/admin/resource-usage').status_code, 403)
             self.assertNotIn('provider_usage', self.get('me/services')['items'][0])
             self.assertNotIn('provider_usage', self.get('me/services/' + str(self.binding.public_id)))
             self.assertNotIn('provider_usage', self.get('me/services/' + str(self.binding.public_id) + '/usage'))
@@ -136,73 +147,76 @@ class ServiceUsageSourceTests(TestCase):
         with override_settings(P8_COMPAT_SOURCES=configs), \
                 patch('portal.resource_usage_view.read_resource_usage_view', return_value=self.dto) as read:
             items = self.get('me/services')['items']
+            read.assert_not_called()
+            resource = self.resource()
             read.assert_called_once_with(self.source['path'])
         self.assertEqual(len(items), 3)
         for item in items:
-            self.assertEqual('provider_usage' in item, item['id'] == str(self.binding.public_id))
+            self.assertNotIn('provider_usage', item)
+        self.assertEqual(resource['service_id'], str(self.binding.public_id))
         self.assertEqual(next(item for item in items if item['id'] == str(entitlement.public_id))['quota_bytes'], '123')
 
     def test_source_cache_is_request_local_and_permission_checked_before_cache(self):
         with patch('portal.resource_usage_view.read_resource_usage_view', return_value=self.dto) as read:
             reader = ServiceUsageSource(self.owner)
-            first = project(self.binding, 'p8', usage_source=reader)
-            second = project(self.binding, 'p8', usage_source=reader)
-            self.assertEqual(first['provider_usage'], second['provider_usage'])
+            first = reader.read(self.binding, 'p8', {'state': 'verified'})
+            second = reader.read(self.binding, 'p8', {'state': 'verified'})
+            self.assertEqual(first, second)
             read.assert_called_once()
             self.assertIsNone(reader.read(self.binding, 'p8', {'state': 'mapping_required'}))
             self.assertIsNone(reader.read(self.binding, 'entitlement', first))
             reader.viewer = self.other
-            self.assertIsNone(reader.read(self.binding, 'p8', first))
+            self.assertIsNone(reader.read(self.binding, 'p8', {'state': 'verified'}))
             project_index(service_index(self.owner), viewer=self.owner)
-            self.assertEqual(read.call_count, 2)
+            self.assertEqual(read.call_count, 1)
 
     def test_source_key_is_stable_for_success_failure_and_path_changes(self):
         path = 'me/services/' + str(self.binding.public_id)
         with patch('portal.resource_usage_view.read_resource_usage_view', return_value=self.dto):
-            success = self.get(path)['provider_usage']
-            repeated = self.get(path)['provider_usage']
+            success = self.resource()['provider_usage']
+            repeated = self.resource()['provider_usage']
         self.assertEqual(success['source_key'], repeated['source_key'])
         with patch('portal.resource_usage_view._private_read', side_effect=FileNotFoundError()):
-            missing = self.get(path)['provider_usage']
+            missing = self.resource()['provider_usage']
         self.assertEqual(missing['source_key'], success['source_key'])
         self.assertEqual(missing['error']['code'], 'usage_unavailable')
         with patch('portal.resource_usage_view._private_read', return_value=b'{broken'):
-            corrupt = self.get(path)['provider_usage']
+            corrupt = self.resource()['provider_usage']
         self.assertEqual(corrupt['source_key'], success['source_key'])
         with override_settings(PROVIDER_USAGE_SOURCE={**self.source, 'path': '/another/usage.json'}), \
                 patch('portal.resource_usage_view.read_resource_usage_view', return_value=self.dto):
-            moved = self.get(path)['provider_usage']
+            moved = self.resource()['provider_usage']
         self.assertEqual(moved['source_key'], success['source_key'])
 
     def test_reverification_and_source_change_replace_key_without_reusing_old_identity(self):
         path = 'me/services/' + str(self.binding.public_id)
         with patch('portal.resource_usage_view.read_resource_usage_view', return_value=self.dto):
-            before = self.get(path)['provider_usage']['source_key']
+            before = self.resource()['provider_usage']['source_key']
             self.binding.revision += 1
             self.binding.verification_sha256 = binding_verification_sha256(self.binding)
             self.binding.save(update_fields=['revision', 'verification_sha256'])
-            verified = self.get(path)['provider_usage']['source_key']
+            verified = self.resource()['provider_usage']['source_key']
             self.assertNotEqual(before, verified)
             self.binding.source_id = 'replacement'
             self.binding.verification_sha256 = binding_verification_sha256(self.binding)
             self.binding.save(update_fields=['source_id', 'verification_sha256'])
             with override_settings(PROVIDER_USAGE_SOURCE={**self.source, 'source_id': 'replacement'},
                     P8_COMPAT_SOURCES={('fixture', 'replacement'): {**self.config, 'source_id': 'replacement'}}):
-                replaced = self.get(path)['provider_usage']['source_key']
+                replaced = self.resource()['provider_usage']['source_key']
             self.assertNotEqual(verified, replaced)
         # 未核对的改变不提供source_key；不能靠旧缓存推测新来源。
         with patch('portal.resource_usage_view.read_resource_usage_view') as read:
-            self.assertNotIn('provider_usage', self.get(path))
+            self.assertEqual(self.resource(), {})
             read.assert_not_called()
 
     def test_source_key_includes_public_service_identity_and_is_not_exposed_cross_account(self):
         from uuid import uuid4
         with patch('portal.resource_usage_view.read_resource_usage_view', return_value=self.dto):
-            before = self.get('me/services/' + str(self.binding.public_id))['provider_usage']['source_key']
+            before = self.resource()['provider_usage']['source_key']
             self.binding.public_id = uuid4()
             self.binding.verification_sha256 = binding_verification_sha256(self.binding)
             self.binding.save(update_fields=['public_id', 'verification_sha256'])
-            after = self.get('me/services/' + str(self.binding.public_id))['provider_usage']['source_key']
+            after = self.resource()['provider_usage']['source_key']
         self.assertNotEqual(before, after)
         self.client.force_login(self.other)
         with patch('portal.resource_usage_view.read_resource_usage_view') as read:

@@ -86,13 +86,7 @@ def project(record, kind, *, administrator=False, detail=False, now=None, viewer
     if administrator:
         item['user'] = {'username': owner.get_username()}
         item.setdefault('compatibility', owner_compatibility(owner))
-    if usage_source is None and viewer is not None:
-        from .service_usage_source import ServiceUsageSource
-        usage_source = ServiceUsageSource(viewer)
-    if usage_source is not None:
-        provider_usage = usage_source.read(record, kind, item)
-        if provider_usage is not None:
-            item['provider_usage'] = provider_usage
+    # 套餐投影永不混入供应商账单；管理员资源使用独立权限端点读取。
     return item
 
 
@@ -160,8 +154,6 @@ def service_index(owner=None, *, q='', state='all', now=None):
 
 
 def project_index(rows, *, administrator=False, detail=False, viewer=None):
-    from .service_usage_source import ServiceUsageSource
-    usage_source = ServiceUsageSource(viewer)
     rows = list(rows)
     records = {}
     for kind, query in service_queries().items():
@@ -173,8 +165,7 @@ def project_index(rows, *, administrator=False, detail=False, viewer=None):
         actual_owner = (record.owner_id if row['source_type'] == 'p8' else record.user_id) if record else None
         if record is None or actual_owner != row['service_owner'] or record.public_id != row['public_id']:
             continue
-        result.append(project(record, row['source_type'], administrator=administrator, detail=detail,
-                              usage_source=usage_source))
+        result.append(project(record, row['source_type'], administrator=administrator, detail=detail))
     return result
 
 

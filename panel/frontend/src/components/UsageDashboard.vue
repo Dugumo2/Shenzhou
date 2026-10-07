@@ -22,6 +22,7 @@ watch(() => [props.data.service_id, props.data.period, metric.value], () => { se
   <div class="dashboard-grid">
     <article class="dashboard-card quota-card" aria-label="套餐额度仪表盘">
       <h3>套餐额度</h3>
+      <p v-if="data.summary.quota_state === 'configured'" class="chart-note">套餐额度待应用，尚未生效。</p>
       <div class="quota-body">
         <div class="quota-ring" :class="{unknown: gauge.percent === null}" :style="gaugeStyle" role="img" data-chart="quota-gauge" :aria-label="gaugeLabel + (gauge.percent === null ? '' : ' ' + gauge.percent + '%')">
           <div class="ring-center"><span>{{ gaugeLabel }}</span><strong>{{ gauge.percent === null ? '—' : gauge.percent + '%' }}</strong></div>
@@ -34,7 +35,7 @@ watch(() => [props.data.service_id, props.data.period, metric.value], () => { se
       <h3>已确认传输量</h3><p class="chart-note">本期原始传输量，未乘流量倍率。</p>
       <div class="transfer-total"><strong>{{ transfer ? bytes(transfer.total) : '待核算' }}</strong><span>上传 + 下载</span></div>
       <div v-if="transfer && !transfer.empty" class="transfer-bar" role="img" data-chart="transfer-composition" :aria-label="'已确认上传占比 ' + transfer.upPercent + '%，下载占比 ' + transfer.downPercent + '%'"><span class="upload" :style="{width:transfer.upPercent+'%'}"></span><span class="download" :style="{width:transfer.downPercent+'%'}"></span></div>
-      <div v-else class="transfer-empty">{{ transfer ? '已确认记录为零' : '等待可靠统计' }}</div>
+      <div v-else class="transfer-empty" data-chart="transfer-composition" role="img" :aria-label="transfer ? '已确认上传和下载均为零' : '上传下载尚未记录'">{{ transfer ? '已确认记录为零' : '等待可靠统计' }}</div>
       <dl class="transfer-legend"><div><dt><i class="upload"></i>上传</dt><dd>{{ bytes(data.summary.upload_bytes) }}</dd></div><div><dt><i class="download"></i>下载</dt><dd>{{ bytes(data.summary.download_bytes) }}</dd></div></dl>
     </article>
   </div>

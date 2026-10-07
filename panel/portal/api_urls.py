@@ -14,6 +14,7 @@ app_name = 'api'
 urlpatterns = [
     path('catalog/guides', guide_api.guides, name='guides'),
     path('admin/overview', admin_api.overview, name='admin_overview'),
+    path('admin/resource-usage', admin_api.resource_usage, name='admin_resource_usage'),
     path('admin/observed-site', observation_api.observed_site, name='observed_site'),
     path('admin/users', admin_api.users, name='admin_users'),
     path('admin/users/<str:user_id>', admin_api.user_detail, name='admin_user_detail'),

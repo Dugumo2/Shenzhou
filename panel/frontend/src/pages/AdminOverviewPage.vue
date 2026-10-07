@@ -4,6 +4,7 @@ import { errorMessage, request } from '../api'
 import { formatDate } from '../display'
 import type { AdminOverview } from '../adminTypes'
 import ObservedSite from '../components/ObservedSite.vue'
+import AdminResourceUsage from '../components/AdminResourceUsage.vue'
 
 const overview = ref<AdminOverview | null>(null)
 const busy = ref(true), error = ref('')
@@ -24,6 +25,7 @@ onUnmounted(() => { generation++ })
 </script>
 <template>
   <div class="page-title"><div><p class="eyebrow">管理员工作区</p><h1>管理总览</h1><p class="muted">查看已登记的用户、服务与需要核对的事项。</p></div><el-button :loading="busy" @click="load">刷新</el-button></div>
+  <AdminResourceUsage />
   <ObservedSite @loaded="observedAvailable = observedAvailable || $event" />
   <component :is="observedAvailable ? 'details' : 'div'">
   <summary v-if="observedAvailable">本地候选统计</summary>

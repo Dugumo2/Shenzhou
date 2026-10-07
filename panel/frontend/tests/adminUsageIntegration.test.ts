@@ -33,10 +33,10 @@ function service(changes: Partial<Service> = {}): Service {
 // 真实管理页面与真实资源组件；只替换HTTP、Session和Element宿主，不复制业务模板。
 async function renderPage(page: string, services: Service[], openUsage = false) {
   const cache = new Map<string, any>(), requests: string[] = []
-  const target = resolve(root, 'pages', page)
+  const target = resolve(root, page === 'AdminResourceUsage.vue' ? 'components' : 'pages', page)
   const session = { authenticated: true, user: { username: 'fixture-admin', is_staff: true }, csrf_token: 'fixture-session' }
   const pagination = { page: 1, page_size: 25, total: services.length, pages: 1, has_next: false, has_previous: false }
-  const data = page === 'AdminServicesPage.vue' ? { items: services, pagination } : { user: { id: 'fixture-admin', username: 'fixture-admin', is_active: true, is_staff: true, service_count: services.length, mapping_required: false }, services }
+  const data = page === 'AdminResourceUsage.vue' ? {items:services.filter(s=>s.provider_usage).map(s=>({service_id:s.id,provider_usage:s.provider_usage}))} : page === 'AdminServicesPage.vue' ? { items: services, pagination } : { user: { id: 'fixture-admin', username: 'fixture-admin', is_active: true, is_staff: true, service_count: services.length, mapping_required: false }, services }
   function load(filename: string): any {
     if (cache.has(filename)) return cache.get(filename)
     if (filename.endsWith('BillingDrawer.vue')) return { default: { render: () => null } }
@@ -66,7 +66,6 @@ async function renderPage(page: string, services: Service[], openUsage = false) 
   const wrapper = { ...component, async setup(props: any, context: any) {
     const state = component.setup(props, context)
     for (let i = 0; i < 30; i++) await Promise.resolve()
-    if (openUsage) state.viewUsage(state.items.value[0])
     return state
   } }
   const app = vue.createSSRApp(wrapper)
@@ -78,46 +77,41 @@ async function renderPage(page: string, services: Service[], openUsage = false) 
   return { html: await renderToString(app), requests }
 }
 
-test('订阅管理真实模板恰好七列，资源独立表达且保留个人套餐数值', async () => {
-  const personal = service({ id: 'personal-service', source_type: 'entitlement', provider_usage: undefined, quota_bytes: '100000000000', used_bytes: '30000000000', remaining_bytes: '70000000000', actions: { billing: true, quota: false, renew: false, grants: false, enable: false, reset: false } })
-  const { html, requests } = await renderPage('AdminServicesPage.vue', [service(), personal])
-  assert.equal((html.match(/data-column=/g) || []).length, 7)
-  assert.doesNotMatch(html, /data-column="资料来源"/)
-  for (const text of ['原订阅资源', '按资源查看', '各资源独立', '按资源分别到期', 'HOME · BWG', '资源用量', '重置时间', '100 GB', '30 GB', '70 GB']) assert.ok(html.includes(text), text)
-  assert.equal(requests.length, 1)
-  assert.match(requests[0], /^\/admin\/services\?/)
+test('管理订阅真实模板固定七列，P8和权益共用套餐摘要而不使用采购数字',async()=>{
+  const personal=service({quota_bytes:'100000000000',used_bytes:'30000000000',remaining_bytes:'70000000000',expires_at:'2027-01-19T00:00:00+08:00',actions:{billing:true,quota:false,renew:false,grants:false,enable:false,reset:false}})
+  const {html,requests}=await renderPage('AdminServicesPage.vue',[personal])
+  assert.equal((html.match(/data-column=/g)||[]).length,7)
+  for(const text of ['100 GB','30 GB','70 GB','2027','重置时间'])assert.ok(html.includes(text),text)
+  assert.doesNotMatch(html,/各资源独立|按资源查看|HOME|BWG|>资源用量</)
+  assert.equal(requests.length,1)
 })
 
-test('管理员实际资源抽屉由同DTO保留额度环图、上传下载图和独立日期', async () => {
-  const { html } = await renderPage('AdminServicesPage.vue', [service()], true)
-  assert.match(html, /data-drawer="resources"/)
-  assert.equal((html.match(/data-chart="quota-gauge"/g) || []).length, 2)
-  assert.equal((html.match(/data-chart="transfer-composition"/g) || []).length, 1)
-  for (const text of ['HOME', 'BWG', '73 GB', '120 GB', '327 GB', '1,880 GB', '2027-01-19', '各资源分别统计']) assert.ok(html.includes(text), text)
+test('独立管理员资源区域保留两份采购圆环、原始上下行与各自日期',async()=>{
+  const {html,requests}=await renderPage('AdminResourceUsage.vue',[service()])
+  assert.deepEqual(requests,['/admin/resource-usage'])
+  assert.equal((html.match(/data-chart="quota-gauge"/g)||[]).length,2)
+  assert.equal((html.match(/data-chart="transfer-composition"/g)||[]).length,1)
+  for(const text of ['资源采购用量','HOME','BWG','73 GB','120 GB','327 GB','1,880 GB','2027-01-19'])assert.ok(html.includes(text),text)
+  assert.match(readFileSync(resolve(root,'pages/AdminOverviewPage.vue'),'utf8'),/<AdminResourceUsage \/>/)
 })
 
-test('管理员用户服务实际入口展示同资源摘要，不再用未知个人值盖掉已有统计', async () => {
-  const { html, requests } = await renderPage('AdminUserPage.vue', [service()])
-  for (const text of ['data-usage-scope="resources"', 'HOME', 'BWG', '73 GB', '120 GB', '各资源额度独立计算', '2027-01-19', '采样：']) assert.ok(html.includes(text), text)
-  assert.doesNotMatch(html, /暂无可靠统计|本期总额度|当前用量和剩余待核算/)
-  assert.deepEqual(requests, ['/admin/users/fixture-admin'])
+test('管理员用户服务实际入口保留统一套餐字段，采购数据不占套餐位置',async()=>{
+  const {html,requests}=await renderPage('AdminUserPage.vue',[service({quota_bytes:'100000000000',used_bytes:'30000000000',remaining_bytes:'70000000000'})])
+  for(const text of ['本期总额度','100 GB','30 GB','70 GB','下次重置时间','到期时间'])assert.ok(html.includes(text),text)
+  assert.doesNotMatch(html,/HOME|BWG|data-usage-scope="resources"/)
+  assert.deepEqual(requests,['/admin/users/fixture-admin'])
 })
 
-test('没有provider权限时两处管理页面均不生成资源数据或用量入口', async () => {
-  const withoutSource = service({ provider_usage: undefined })
-  const listing = (await renderPage('AdminServicesPage.vue', [withoutSource])).html
-  const detail = (await renderPage('AdminUserPage.vue', [withoutSource])).html
-  assert.doesNotMatch(listing, /HOME|BWG|data-drawer|>资源用量</)
-  assert.doesNotMatch(detail, /HOME|BWG|73 GB|120 GB/)
-  assert.match(detail, /资源统计暂不可读取/)
-})
-
-test('统计快照不可用时实际管理入口显示错误，空源不画零用量', async () => {
-  const unavailable = service({ provider_usage: { schema_version: 2, generated_at: null, meters: [], error: { code: 'usage_unavailable', message: '统计暂不可用，请稍后更新。' } } })
-  const drawer = (await renderPage('AdminServicesPage.vue', [unavailable], true)).html
-  const detail = (await renderPage('AdminUserPage.vue', [unavailable])).html
-  for (const html of [drawer, detail]) {
-    assert.match(html, /统计暂不可用，请稍后更新/)
-    assert.doesNotMatch(html, /data-chart=|0 GB|暂无可靠统计/)
+test('无采购统计权限时不生成资源数字，订阅与用户页仍保留套餐字段',async()=>{
+  const without=service({provider_usage:undefined})
+  for(const page of ['AdminServicesPage.vue','AdminUserPage.vue','AdminResourceUsage.vue']){
+    const {html}=await renderPage(page,[without]);assert.doesNotMatch(html,/HOME|BWG|73 GB|120 GB|data-chart=/)
   }
+})
+
+test('采购快照失败由独立管理区域显示，空来源不造0或百分比',async()=>{
+  const unavailable=service({provider_usage:{schema_version:2,generated_at:null,meters:[],error:{code:'usage_unavailable',message:'统计暂不可用，请稍后更新。'}}})
+  const {html}=await renderPage('AdminResourceUsage.vue',[unavailable])
+  assert.match(html,/统计暂不可用，请稍后更新/)
+  assert.doesNotMatch(html,/data-chart=|0 GB/)
 })

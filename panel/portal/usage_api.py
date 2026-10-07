@@ -1,8 +1,10 @@
 """R03/R08 本人服务用量只读投影；入账日期不代表流量发生日期。"""
 import uuid
+from contextlib import contextmanager
 from datetime import timedelta
 from zoneinfo import ZoneInfo
 
+from django.db import connection, transaction
 from django.db.models import Count, Sum
 from django.db.models.functions import TruncDate
 from django.utils import timezone
@@ -16,7 +18,7 @@ from .models import UsageLedger
 
 SHANGHAI = ZoneInfo('Asia/Shanghai')
 DAY_LIMIT = 90
-PERIODS = ('current', '7d', '30d')
+PERIODS = ('current', '7d', '30d', 'month', 'year')
 HISTORY_MESSAGE = ('这里只展示已确认入账记录，入账日期不代表流量发生日期。'
                    '现有记录没有完整采样区间，未显示的日期不代表零流量，补采记录不会分摊到其他日期。')
 
@@ -93,32 +95,65 @@ def _service(record, source_type, period, now):
             'history': _history(selected, start, end, now)}
 
 
+@contextmanager
+def _read_snapshot():
+    """SQLite使用延迟只读快照；不为图表查询取得写预留锁。"""
+    connection.ensure_connection()
+    prior = getattr(connection, 'transaction_mode', None)
+    change = connection.vendor == 'sqlite' and not connection.in_atomic_block
+    if change:
+        connection.transaction_mode = 'DEFERRED'
+    try:
+        with transaction.atomic():
+            yield
+    finally:
+        if change:
+            connection.transaction_mode = prior
+
+
 @endpoint()
 def service_usage(request, public_id):
-    from .service_projection import project, resolve
-    from .p8_compat import unknown_usage
     periods = request.GET.getlist('period')
     period = periods[0] if periods else 'current'
-    if len(periods) > 1 or period not in PERIODS:
-        return error('invalid_filter', '请选择本期、近7天或近30天。', 422,
-                     {'period': ['仅支持 current、7d、30d。']})
+    cursors = request.GET.getlist('cursor')
+    if (len(periods) > 1 or period not in PERIODS or len(cursors) > 1
+            or (cursors and (len(cursors[0]) > 2048 or period in ('current', '30d')))):
+        return error('invalid_filter', '统计范围或分页信息无效。', 422)
+    with _read_snapshot():
+        return _usage_response(request, public_id, period, cursors[0] if cursors else None)
+
+
+def _usage_response(request, public_id, period, cursor):
+    from .service_projection import project, resolve
+    from .p8_compat import unknown_usage
+    from .usage_timeseries import build_usage_views, empty_usage_views, TimeseriesUnavailable
     result = resolve(request.user, public_id)
     if result is None:
         return error('not_found', '服务不存在或不可访问。', 404)
     kind, record = result
     item = project(record, kind, viewer=request.user)
+    target = record if kind == 'entitlement' and item['state'] != 'mapping_required' else None
     if kind == 'p8' and item['state'] != 'mapping_required':
         from .p8_entitlement import current_entitlement
         target = current_entitlement(record)
-        if target is not None:
-            value = _service(target, 'entitlement', period, timezone.now())
-            value.update(service_id=str(record.public_id), source_type='p8')
-            if 'provider_usage' in item:
-                value['provider_usage'] = item['provider_usage']
-            return success(value)
-    if kind == 'p8' or item['state'] == 'mapping_required':
-        value = unknown_usage(record.public_id, period, source_type=kind)
-        if 'provider_usage' in item:
-            value['provider_usage'] = item['provider_usage']
-        return success(value)
-    return success(_service(record, kind, period, timezone.now()))
+    now = timezone.now()
+    legacy_period = period if period in ('current', '7d', '30d') else 'current'
+    if target is not None:
+        value = _service(target, 'entitlement', legacy_period, now)
+    elif kind == 'p8' or item['state'] == 'mapping_required':
+        value = unknown_usage(record.public_id, legacy_period, source_type=kind)
+    else:
+        value = _service(record, kind, legacy_period, now)
+    value.update(service_id=str(record.public_id), source_type=kind, period=period)
+    if period in ('7d', 'month', 'year'):
+        try:
+            if target is None and cursor is not None:
+                return error('invalid_filter', '统计分页信息无效。', 422)
+            views = (build_usage_views(target, period, now=now, cursor=cursor) if target is not None
+                     else empty_usage_views(record.public_id, period, now=now))
+        except TimeseriesUnavailable as exc:
+            # 固定代码由聚合器定义，不回传异常、来源路径或内部账记录。
+            return error('usage_range_unavailable', '该范围统计暂时无法确认，请重新读取。', 422,
+                         {'reason': [exc.code]})
+        value.update(schema_version=2, **views)
+    return success(value)

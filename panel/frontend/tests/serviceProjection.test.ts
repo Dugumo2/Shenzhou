@@ -14,7 +14,7 @@ import { ApiError } from '../src/api.ts'
 function mount(page: string, route: any, request: (path: string) => Promise<unknown>) {
   const replacements: any[] = [], hooks: Array<() => void> = []
   const auth = vue.reactive({ session: { authenticated: true, user: { username: 'admin', is_staff: true }, csrf_token: 'fixture-session' } })
-  const descriptor = parse(readFileSync(new URL('../src/pages/' + page, import.meta.url), 'utf8')).descriptor
+  const descriptor = parse(readFileSync(new URL('../src/' + (page === 'AdminResourceUsage.vue' ? 'components/' : 'pages/') + page, import.meta.url), 'utf8')).descriptor
   const script = compileScript(descriptor, { id: 'service-projection' })
   const code = ts.transpileModule(script.content, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText
   const exports: Record<string, any> = {}, scope = vue.effectScope()
@@ -65,59 +65,55 @@ test('用户详情尊重来源操作能力，P8不能打开账期编辑', async 
 })
 
 function listing() {
-  return { items: [{ id: 'p8-fixture', source_type: 'p8', provider_usage: { schema_version: 2, generated_at: '2026-10-07T05:00:00Z', meters: [{ id: 'home', used_bytes: '300', observed_at: '2026-10-07T04:59:00Z' }] }, actions: { billing: false } }], pagination: { page: 1, page_size: 25, total: 1, pages: 1, has_next: false, has_previous: false } }
+  return { items: [{ service_id: 'p8-fixture', source_type: 'p8', provider_usage: { schema_version: 2, generated_at: '2026-10-07T05:00:00Z', meters: [{ id: 'home', used_bytes: '300', observed_at: '2026-10-07T04:59:00Z' }] }, actions: { billing: false } }], pagination: { page: 1, page_size: 25, total: 1, pages: 1, has_next: false, has_previous: false } }
 }
 
 test('订阅页同次刷新去重、保留真实资源抽屉，网络失败不替换来源时间', async () => {
   let reads = 0, reject: ((reason: unknown) => void) | undefined
   const data = listing()
-  const ui = mount('AdminServicesPage.vue', vue.reactive({ query: {}, params: {} }), async () => {
+  const ui = mount('AdminResourceUsage.vue', vue.reactive({ query: {}, params: {} }), async () => {
     reads++
     if (reads === 1) return data
     return new Promise((_resolve, fail) => { reject = fail })
   })
   await flush()
-  ui.state.viewUsage(ui.state.items.value[0])
-  assert.deepEqual(ui.state.usageService.value.provider_usage, data.items[0].provider_usage)
+  assert.deepEqual(ui.state.items.value[0].provider_usage, data.items[0].provider_usage)
   const first = ui.state.load(), second = ui.state.load()
   assert.equal(first, second)
   await flush()
   assert.equal(reads, 2)
   assert.equal(ui.state.initialLoading.value, false)
-  assert.equal(ui.state.usageService.value.id, 'p8-fixture')
+  assert.equal(ui.state.items.value[0].service_id, 'p8-fixture')
   reject!(new ApiError(0, 'NETWORK_ERROR', '网络失败'))
   await first; await flush()
   assert.equal(ui.state.items.value.length, 1)
-  assert.equal(ui.state.usageService.value.provider_usage.meters[0].observed_at, '2026-10-07T04:59:00Z')
+  assert.equal(ui.state.items.value[0].provider_usage.meters[0].observed_at, '2026-10-07T04:59:00Z')
   ui.unmount()
 })
 
 test('订阅页401/403/404会清空列表和资源抽屉，不保留撤权后的副本', async () => {
   for (const status of [401, 403, 404]) {
     let reads = 0
-    const ui = mount('AdminServicesPage.vue', vue.reactive({ query: {}, params: {} }), async () => {
+    const ui = mount('AdminResourceUsage.vue', vue.reactive({ query: {}, params: {} }), async () => {
       if (++reads === 1) return listing()
       throw new ApiError(status, 'DENIED', '无权访问')
     })
-    await flush(); ui.state.viewUsage(ui.state.items.value[0])
+    await flush()
     await ui.state.load(); await flush()
     assert.deepEqual(ui.state.items.value, [])
-    assert.equal(ui.state.usageService.value, null)
-    assert.equal(ui.state.usageId.value, null)
-    ui.unmount()
+      ui.unmount()
   }
 })
 
 test('订阅页角色撤销同步清空，旧请求迟到不恢复来源数据', async () => {
   let reads = 0, resolveLate: ((value: unknown) => void) | undefined
-  const ui = mount('AdminServicesPage.vue', vue.reactive({ query: {}, params: {} }), async () => {
+  const ui = mount('AdminResourceUsage.vue', vue.reactive({ query: {}, params: {} }), async () => {
     if (++reads === 1) return listing()
     return new Promise(resolve => { resolveLate = resolve })
   })
-  await flush(); ui.state.viewUsage(ui.state.items.value[0]); const late = ui.state.load(); await flush()
+  await flush(); const late = ui.state.load(); await flush()
   ui.auth.session.user.is_staff = false
   assert.deepEqual(ui.state.items.value, [])
-  assert.equal(ui.state.usageService.value, null)
   resolveLate!(listing()); await late; await flush()
   assert.deepEqual(ui.state.items.value, [])
   assert.equal(reads, 2)

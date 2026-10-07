@@ -1,5 +1,5 @@
 import { computed, onScopeDispose, shallowRef } from 'vue'
-import { errorMessage } from './api.ts'
+import { ApiError, errorMessage } from './api.ts'
 import { createSnapshotRequest } from './snapshotRequest.ts'
 import type { SnapshotRequestOptions } from './snapshotRequest.ts'
 
@@ -16,6 +16,7 @@ export function useSnapshotRequest<T>(options: SnapshotRequestOptions<T> = {}) {
     refreshing: computed(() => state.value.busy && state.value.hasLoaded),
     hasLoaded: computed(() => state.value.hasLoaded),
     error: computed(() => state.value.error === null ? '' : errorMessage(state.value.error)),
+    accessDenied: computed(() => state.value.error instanceof ApiError && [401, 403, 404].includes(state.value.error.status)),
     lastReadAt: computed(() => state.value.lastReadAt),
     load: controller.load,
     reset: controller.reset,

@@ -2,21 +2,19 @@
 import { computed, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { auth } from '../auth'
-import { retainServiceResources, resourceReadError } from '../resourceSnapshot'
+import { retainServiceResources } from '../resourceSnapshot'
 import { useSnapshotRequest } from '../useSnapshotRequest'
 import { useSessionIdentity } from '../useSessionIdentity'
 import { formatDate, formatGB } from '../display'
 import type { AdminUserDetail } from '../adminTypes'
 import type { Service } from '../types'
 import BillingDrawer from '../components/BillingDrawer.vue'
-import ResourceUsageSummary from '../components/ResourceUsageSummary.vue'
 import RefreshControl from '../components/RefreshControl.vue'
 
 const route = useRoute()
 const snapshot = useSnapshotRequest<AdminUserDetail>({ reconcile: (next, old) => ({
   ...next, services: next.services.map(service => retainServiceResources(service, old && old.user.id === next.user.id ? old.services.find(item => item.id === service.id) || null : null)),
 }) })
-const sourceError = computed(() => resourceReadError(snapshot.data.value?.services || []))
 const { data: detail, busy, error, initialLoading, lastReadAt } = snapshot
 const identity = useSessionIdentity(() => auth.session)
 const selectedId = ref<string | null>(null)
@@ -37,7 +35,7 @@ watch([() => route.params.id, identity], () => { selectedId.value = null; snapsh
 </script>
 <template>
   <RouterLink :to="{ path: '/admin/users', query: route.query }" class="back-link">← 返回用户管理</RouterLink>
-  <div class="page-title"><div><p class="eyebrow">管理员工作区 · 用户详情</p><h1 class="admin-username">{{ detail?.user.username || '用户详情' }}</h1><p class="muted">查看账号与该用户分配的服务。</p></div><RefreshControl :loading="busy" :error="error" :source-error="sourceError" :last-read-at="lastReadAt" @refresh="load" /></div>
+  <div class="page-title"><div><p class="eyebrow">管理员工作区 · 用户详情</p><h1 class="admin-username">{{ detail?.user.username || '用户详情' }}</h1><p class="muted">查看账号与该用户分配的服务。</p></div><RefreshControl :loading="busy" :error="error" :last-read-at="lastReadAt" @refresh="load" /></div>
   <el-alert v-if="error" :title="error" type="error" show-icon :closable="false" class="spaced" />
   <el-skeleton v-if="initialLoading" :rows="7" animated />
   <template v-if="detail">
@@ -50,8 +48,7 @@ watch([() => route.params.id, identity], () => { selectedId.value = null; snapsh
     <section v-if="!detail.services.length" class="surface empty-state"><div class="empty-symbol" aria-hidden="true">舟</div><h2>当前没有已分配的服务</h2><p>服务开通能力尚未接通，当前仅提供账号与服务查询。</p></section>
     <div v-else class="admin-user-services">
       <section v-for="service in detail.services" :key="service.id" class="surface admin-user-service"><div class="card-heading"><h2>神舟云 <span class="short-id">#{{ service.id.slice(0, 8) }}</span></h2><el-tag :type="service.business_state === 'active' ? 'success' : 'info'">{{ service.status_label }}</el-tag></div>
-        <ResourceUsageSummary v-if="service.source_type === 'p8'" :data="service.provider_usage" />
-        <dl v-else class="metrics-grid"><div><dt>本期总额度</dt><dd>{{ formatGB(service.quota_bytes) }}</dd></div><div><dt>已用</dt><dd>{{ formatGB(service.used_bytes, '暂无可靠统计') }}</dd><span v-if="service.usage.quality !== 'measured' && service.used_bytes !== null" class="small muted">上次已确认</span></div><div><dt>剩余</dt><dd>{{ formatGB(service.remaining_bytes, '待核算') }}</dd></div><div><dt>下次重置时间</dt><dd class="date-value">{{ formatDate(service.next_reset_at) }}</dd></div><div><dt>到期时间</dt><dd class="date-value">{{ formatDate(service.expires_at) }}</dd></div><div><dt>最后统计时间</dt><dd class="date-value">{{ formatDate(service.usage.updated_at) }}</dd></div></dl>
+        <dl class="metrics-grid"><div><dt>本期总额度</dt><dd>{{ formatGB(service.quota_bytes) }}</dd></div><div><dt>已用</dt><dd>{{ formatGB(service.used_bytes, '暂无可靠统计') }}</dd><span v-if="service.usage.quality !== 'measured' && service.used_bytes !== null" class="small muted">上次已确认</span></div><div><dt>剩余</dt><dd>{{ formatGB(service.remaining_bytes, '待核算') }}</dd></div><div><dt>下次重置时间</dt><dd class="date-value">{{ formatDate(service.next_reset_at) }}</dd></div><div><dt>到期时间</dt><dd class="date-value">{{ formatDate(service.expires_at) }}</dd></div><div><dt>最后统计时间</dt><dd class="date-value">{{ formatDate(service.usage.updated_at) }}</dd></div></dl>
         <p class="small muted">资料来源：{{ service.source_type === 'p8' ? '原订阅资源' : service.source_type === 'membership' ? '会员登记' : '服务权益' }}</p><p v-if="service.source_type !== 'p8'" class="quality-note">{{ service.usage.message }}</p>
         <div class="admin-service-actions"><el-button v-if="service.actions?.billing" type="primary" plain @click="editBilling(service)">调整下一次重置时间</el-button><span v-else class="small muted">当前服务暂不可调整重置时间。</span></div>
       </section>

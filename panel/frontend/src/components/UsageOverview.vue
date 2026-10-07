@@ -2,94 +2,57 @@
 import { computed, ref, watch } from 'vue'
 import { useSnapshotRequest } from '../useSnapshotRequest'
 import { useSessionIdentity } from '../useSessionIdentity'
-import { retainResourceUsage, resourceReadError } from '../resourceSnapshot'
 import { auth } from '../auth'
 import RefreshControl from './RefreshControl.vue'
-import { formatDate, formatGB, integerBytes } from '../display'
-import { reliableUsagePercent } from '../usage-types'
+import { formatDate } from '../display'
 import UsageDashboard from './UsageDashboard.vue'
-import ProviderUsageDashboard from './ProviderUsageDashboard.vue'
-import type { UsageOverviewData, UsagePeriod, UsageBytes } from '../usage-types'
-
+import UsageTimeline from './UsageTimeline.vue'
+import type { UsageOverviewData, UsagePeriod, CalendarPeriod } from '../usage-types'
 const props = defineProps<{
   serviceId: string; refreshKey?: number; summaryOnly?: boolean
   managed?: boolean; snapshot?: UsageOverviewData | null; loading?: boolean; loadError?: string
 }>()
 const emit = defineEmits<{ 'period-change': [period: UsagePeriod] }>()
 const identity = useSessionIdentity(() => auth.session)
-const reader = useSnapshotRequest<UsageOverviewData>({ reconcile: retainResourceUsage })
-const period = ref<UsagePeriod>('current')
+const reader = useSnapshotRequest<UsageOverviewData>()
+const period = ref<CalendarPeriod>('7d')
 const data = computed(() => props.managed ? props.snapshot || null : reader.data.value)
-const sourceError = computed(() => resourceReadError(data.value ? [data.value] : []))
 const busy = computed(() => props.managed ? !!props.loading : reader.busy.value)
 const error = computed(() => props.managed ? props.loadError || '' : reader.error.value)
-const recordsOpen = ref(false)
 const headingId = computed(() => 'usage-' + props.serviceId + (props.summaryOnly ? '-summary' : '-detail'))
-const periods: { id: UsagePeriod; label: string }[] = [{ id: 'current', label: '本期' }, { id: '7d', label: '近7天' }, { id: '30d', label: '近30天' }]
-const qualityLabel = computed(() => ({ measured: '已取得当前样本', stale: '统计已过期', gap: '统计存在缺口', unknown: '暂无可靠统计' })[data.value?.quality.state || 'unknown'])
-const percentage = computed(() => data.value ? reliableUsagePercent(data.value) : null)
+const qualityLabel = computed(() => ({ measured: '当前用量已确认', stale: '显示上次记录', gap: '部分时段缺少记录', unknown: '尚未取得用量记录' })[data.value?.quality.state || 'unknown'])
+const periods: { id: CalendarPeriod; label: string }[] = [{ id: '7d', label: '近7天' }, { id: 'month', label: '本月' }, { id: 'year', label: '今年' }]
 function load() {
   if (props.managed) return
   return reader.load('/me/services/' + encodeURIComponent(props.serviceId) + '/usage?period=' + period.value, identity.value)
 }
 watch(() => [props.serviceId, props.refreshKey, period.value, identity.value], () => { if (!props.managed) void load() }, { immediate: true })
 watch(period, value => { if (props.managed) emit('period-change', value) })
-function bytes(value: UsageBytes, unknown = '暂无可靠统计') {
-  const parsed = integerBytes(value)
-  // 非零小样本不能因GB两位显示而伪装成0GB。
-  return parsed !== null && parsed > 0n && parsed < 10_000_000n ? '< 0.01 GB' : formatGB(value, unknown)
-}
 </script>
-
 <template>
   <section class="surface usage-overview" :aria-labelledby="headingId" :aria-busy="busy">
-    <div class="section-title"><div><h2 :id="headingId">{{ summaryOnly ? '流量仪表盘' : '流量用量与统计图' }}</h2><p class="small muted">{{ data?.provider_usage ? '查看已接入来源的用量和更新时间。' : '查看这份服务的额度占用与传输构成。' }}</p></div><RefreshControl v-if="!managed" :loading="busy" :error="error" :source-error="sourceError" :last-read-at="reader.lastReadAt.value" @refresh="load" /></div>
+    <div class="section-title"><div><h2 :id="headingId">{{ summaryOnly ? '套餐流量概览' : '流量用量' }}</h2><p class="small muted">{{ summaryOnly ? '查看本期套餐额度与原始上传、下载构成。' : '按实际采样时间查看这份套餐的使用情况。' }}</p></div><RefreshControl v-if="!managed" :loading="busy" :error="error" :last-read-at="reader.lastReadAt.value" @refresh="load" /></div>
     <el-alert v-if="error" :title="error" type="error" show-icon :closable="false" />
-    <el-skeleton v-if="busy && !data" :rows="4" animated />
-    <template v-if="data">
-      <template v-if="data.provider_usage"><ProviderUsageDashboard :data="data.provider_usage" /><p v-if="!summaryOnly" class="small muted">当前来源提供用量快照，尚未提供可用于绘制趋势的历史采样。</p></template>
-      <template v-else>
-      <div class="quality-line"><el-tag :type="data.quality.state === 'measured' ? 'success' : 'warning'">{{ qualityLabel }}</el-tag><span class="small muted">最后采集：{{ data.quality.collected_at ? formatDate(data.quality.collected_at) : '暂无采集记录' }}</span></div>
-      <p class="quality-note">{{ data.quality.message }}</p>
-      <div v-if="!summaryOnly" class="history-heading"><h3>统计范围</h3><el-radio-group v-model="period" aria-label="统计记录时间范围" :disabled="busy"><el-radio-button v-for="option in periods" :key="option.id" :value="option.id">{{ option.label }}</el-radio-button></el-radio-group></div>
-      <UsageDashboard :data="data" :compact="summaryOnly" />
-      <p class="small muted">套餐用量按上传、下载和授权倍率折算，原始传输量另列。</p>
-      <dl v-if="!summaryOnly" class="usage-dates"><div><dt>本期流量周期</dt><dd v-if="data.current_cycle">{{ formatDate(data.current_cycle.starts_at) }} 至 {{ formatDate(data.current_cycle.ends_at) }}</dd><dd v-else>当前周期尚未确认</dd></div><div><dt>下次流量重置</dt><dd>{{ data.source_type === 'p8' && !data.summary.next_reset_at ? '暂不可确认' : formatDate(data.summary.next_reset_at) }}</dd></div></dl>
-      <details v-if="!summaryOnly" class="usage-records" :open="recordsOpen" @toggle="recordsOpen = ($event.target as HTMLDetailsElement).open"><summary>查看详细统计</summary>
-      <div class="history-heading"><h3>流量统计记录</h3></div>
-      <p class="small muted">按统计记录的日期汇总，可能包含延迟上报的用量，不代表当天实际使用量；没有记录的日期不代表零流量。</p>
-      <p v-if="period !== 'current'" class="small muted">记录范围：{{ formatDate(data.history.range_start) }} 至 {{ formatDate(data.history.range_end) }}</p>
-      <template v-if="data.history.record_count && data.history.totals">
-        <div class="usage-table-scroll"><table class="usage-table"><caption>所选范围已确认套餐用量 {{ bytes(data.history.totals.charged_bytes) }}</caption><thead><tr><th scope="col">记录日期</th><th scope="col">套餐用量</th><th scope="col">上传</th><th scope="col">下载</th></tr></thead><tbody><tr v-for="day in data.history.days" :key="day.date"><th scope="row">{{ day.date }}</th><td>{{ bytes(day.charged_bytes) }}</td><td>{{ bytes(day.upload_bytes) }}</td><td>{{ bytes(day.download_bytes) }}</td></tr></tbody></table></div>
-        <p v-if="data.history.days_truncated" class="small muted">仅列出最近 {{ data.history.day_limit }} 个有记录的日期；汇总包含所选范围的全部已确认记录。</p>
+    <template v-if="summaryOnly">
+      <el-skeleton v-if="busy && !data" :rows="4" animated />
+      <template v-if="data">
+        <div class="quality-line"><el-tag :type="data.quality.state === 'measured' ? 'success' : 'warning'">{{ qualityLabel }}</el-tag><span class="small muted">最后采集：{{ data.quality.collected_at ? formatDate(data.quality.collected_at) : '暂无采集记录' }}</span></div>
+        <UsageDashboard :data="data" compact />
+        <dl class="usage-dates"><div><dt>本期流量周期</dt><dd v-if="data.current_cycle">{{ formatDate(data.current_cycle.starts_at) }} 至 {{ formatDate(data.current_cycle.ends_at) }}</dd><dd v-else>当前周期尚未确认</dd></div></dl>
       </template>
-      <p v-else class="inline-note">{{ data.source_type === 'membership' || data.source_type === 'p8' ? '此服务暂无可靠统计，请联系管理员核对。' : '所选范围暂无已确认记录，不代表没有使用流量。' }}</p>
-      <p v-if="data.history.excluded_record_count" class="quality-note">另有 {{ data.history.excluded_record_count }} 条待核验记录，暂未计入汇总。</p>
-      <p class="small muted">上传和下载显示原始传输量；套餐用量按当时的倍率折算，历史不会重新计算。1 GB = 1,000,000,000 字节。</p>
-      </details>
-      </template>
+    </template>
+    <template v-else>
+      <div class="period-selector"><el-radio-group v-model="period" aria-label="统计时间范围"><el-radio-button v-for="option in periods" :key="option.id" :value="option.id">{{ option.label }}</el-radio-button></el-radio-group></div>
+      <UsageTimeline :data="data" :period="period" :loading="busy" />
     </template>
   </section>
 </template>
-
 <style scoped>
-.usage-overview { padding: 26px; margin-bottom: 22px; }
-.quality-line, .progress-caption, .history-heading { display: flex; align-items: center; justify-content: space-between; gap: 14px; flex-wrap: wrap; }
-.quality-line { justify-content: flex-start; margin-top: 20px; }
-.usage-metrics, .history-totals { margin: 22px 0 12px; }
-.usage-progress { margin: 22px 0; }
-.progress-caption { margin-bottom: 10px; }
-.usage-dates { display: grid; grid-template-columns: 2fr 1fr; gap: 20px; margin: 22px 0; }
-.usage-dates dt { color: var(--muted, #687887); font-size: 13px; margin-bottom: 6px; }
-.usage-dates dd { margin: 0; font-size: 14px; }
-.usage-records { border-top: 1px solid var(--border, #dfe6ed); padding-top: 18px; }
-.usage-records summary { color: var(--el-color-primary); cursor: pointer; font-size: 14px; }
-.history-heading { padding-top: 18px; }
-.usage-table-scroll { overflow-x: auto; }
-.usage-table { width: 100%; border-collapse: collapse; font-size: 14px; margin-top: 14px; }
-.usage-table caption { text-align: left; color: var(--muted, #687887); font-size: 12px; padding-bottom: 10px; }
-.usage-table th, .usage-table td { text-align: left; padding: 12px 10px; border-bottom: 1px solid var(--border, #dfe6ed); white-space: nowrap; }
-.usage-table thead th { color: var(--muted, #687887); font-weight: 500; }
-.usage-table tbody th { font-weight: 500; }
-@media (max-width: 640px) { .usage-overview { padding: 18px; } .usage-dates { grid-template-columns: 1fr; } }
+.usage-overview { padding:26px; margin-bottom:22px; }
+.quality-line { display:flex; align-items:center; gap:14px; flex-wrap:wrap; margin-top:20px; }
+.period-selector { margin:22px 0; }
+.usage-dates { display:grid; grid-template-columns:2fr 1fr; gap:20px; margin:22px 0 0; }
+.usage-dates dt { color:var(--muted,#687887); font-size:13px; margin-bottom:6px; }
+.usage-dates dd { margin:0; font-size:14px; }
+@media(max-width:640px) { .usage-overview { padding:18px; }.usage-dates { grid-template-columns:1fr; } }
 </style>
