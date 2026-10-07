@@ -43,6 +43,12 @@ def _record(actor, service_id, lock=False):
     record = query.filter(public_id=service_id).first()
     if record is None:
         raise BillingError('服务不存在。', 'NOT_FOUND', 404)
+    # 隐藏操作按钮不能代替写API门禁：失效旧源映射不能绕开统一服务入口改账期。
+    from .p8_entitlement import claimed_entitlement_ids, mappings, valid_mapping
+    if record.pk in claimed_entitlement_ids():
+        mapping = mappings().filter(entitlement_id=record.pk).first()
+        if mapping is None or not valid_mapping(mapping):
+            raise BillingError('服务不存在。', 'NOT_FOUND', 404)
     return record
 
 

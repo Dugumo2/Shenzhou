@@ -10,6 +10,7 @@ from .api_helpers import (compatibility_for, project_service, service_business_s
                           service_facts, service_queryset, visible_legacy_services)
 from .legacy_binding import verified_legacy_bindings
 from .models import DeviceSubscription, Entitlement, Membership, P8SourceBinding
+from .p8_entitlement import claimed_entitlement_ids, current_entitlement
 
 
 def p8_records():
@@ -24,12 +25,14 @@ def claimed_memberships():
 
 def service_queries(owner=None):
     """相同显式来源只计一次；相撞UUID不形成可访问P8服务。"""
-    p8 = p8_records().exclude(public_id__in=Entitlement.objects.values('public_id')).exclude(
+    claimed_ids = claimed_entitlement_ids()
+    p8 = p8_records().exclude(public_id__in=Entitlement.objects.exclude(pk__in=claimed_ids).values('public_id')).exclude(
         public_id__in=Membership.objects.values('public_id')).exclude(
         public_id__in=DeviceSubscription.objects.values('public_id'))
     members = visible_legacy_services().exclude(pk__in=p8.filter(
         legacy_membership__user_id=F('owner_id')).values('legacy_membership_id'))
-    queries = {'entitlement': service_queryset(), 'membership': members.select_related('user'), 'p8': p8}
+    queries = {'entitlement': service_queryset().exclude(pk__in=claimed_ids),
+               'membership': members.select_related('user'), 'p8': p8}
     if owner is not None:
         queries = {kind: query.filter(**{'owner_id' if kind == 'p8' else 'user_id': owner.pk})
                    for kind, query in queries.items()}
@@ -69,9 +72,10 @@ def project(record, kind, *, administrator=False, detail=False, now=None, viewer
             unresolved(item)
     # 权限只决定是否显示可提交入口，写API仍独立核验最新状态。
     billing = False
-    if administrator and kind == 'entitlement':
+    billing_target = record if kind == 'entitlement' else current_entitlement(record) if kind == 'p8' else None
+    if administrator and billing_target is not None and item['state'] != 'mapping_required':
         from .billing_schedule import _context
-        billing = not _context(record, now)[-1]
+        billing = not _context(billing_target, now)[-1]
     item['actions']['billing'] = billing
     item['capabilities'] = dict(item['actions'], p8_delivery=(kind == 'p8' and not administrator
         and item['state'] != 'mapping_required'))
@@ -108,25 +112,34 @@ def service_index(owner=None, *, q='', state='all', now=None):
                     membership__public_id__icontains=q.replace('-', '')).values('entitlement_id'))
             query = query.filter(search)
         if state == 'expired':
-            # 到期只属于已确认的非P8时间；失效来源不借登记期限参与筛选。
+            # P8仅采用已核套餐期限；失效来源不借会员登记期限参与筛选。
             if kind == 'p8':
-                query = query.none()
+                matches = []
+                for record in query.iterator(chunk_size=100):
+                    target = current_entitlement(record) if valid_p8(record) else None
+                    if target is not None and target.expires_at is not None and target.expires_at <= now:
+                        matches.append(record.pk)
+                query = query.filter(pk__in=matches)
             elif kind == 'membership':
                 query = query.filter(expires_at__lte=now).exclude(pk__in=claimed_memberships().values('legacy_membership_id'))
             else:
                 query = query.filter(expires_at__lte=now)
         elif state != 'all':
             matches = []
-            if kind == 'p8' and state not in ('mapping_required', 'verification_required'):
-                query = query.none()
-            elif kind == 'entitlement' and state == 'mapping_required':
+            if kind == 'entitlement' and state == 'mapping_required':
                 query = query.none()
             elif kind == 'entitlement' and state == 'active':
                 query = query.filter(state='active', enabled=True, user__is_active=True,
                     applied_revision=F('revision'), applied_revision__gt=0, expires_at__gt=now)
             for record in query.iterator(chunk_size=100):
                 if kind == 'p8':
-                    match = state == ('verification_required' if valid_p8(record) else 'mapping_required')
+                    target = current_entitlement(record) if valid_p8(record) else None
+                    if target is not None:
+                        facts = service_facts(target, 'entitlement', now)
+                        business = service_business_status(target, 'entitlement', facts, now)[0]
+                        match = facts['quality'] == 'gap' if state == 'metering_gap' else business == state
+                    else:
+                        match = state == ('verification_required' if valid_p8(record) else 'mapping_required')
                 elif kind == 'membership' and claimed_memberships().filter(legacy_membership_id=record.pk).exists():
                     match = state == 'mapping_required'
                 else:
@@ -169,6 +182,14 @@ def owner_compatibility(owner):
     value = compatibility_for(owner.pk, Entitlement.objects.filter(user=owner).exists())
     if any(not valid_p8(record) for record in p8_records().filter(owner=owner)):
         return {'state': 'mapping_required', 'message': '部分服务资料需要管理员重新核对，暂不提供资源。'}
+    # 已显式核验的P8会员别名属于同一套餐，不再要求另一份LegacyServiceBinding。
+    from .legacy_binding import legacy_service_memberships
+    members = legacy_service_memberships().filter(user=owner).exclude(
+        pk__in=verified_legacy_bindings().values('membership_id'))
+    mapped_members = [record.legacy_membership_id for record in p8_records().filter(owner=owner)
+                      if current_entitlement(record) is not None]
+    if value['state'] == 'mapping_required' and mapped_members and not members.exclude(pk__in=mapped_members).exists():
+        return {'state': 'clear', 'message': None}
     return value
 
 

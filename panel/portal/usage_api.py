@@ -107,6 +107,15 @@ def service_usage(request, public_id):
         return error('not_found', '服务不存在或不可访问。', 404)
     kind, record = result
     item = project(record, kind, viewer=request.user)
+    if kind == 'p8' and item['state'] != 'mapping_required':
+        from .p8_entitlement import current_entitlement
+        target = current_entitlement(record)
+        if target is not None:
+            value = _service(target, 'entitlement', period, timezone.now())
+            value.update(service_id=str(record.public_id), source_type='p8')
+            if 'provider_usage' in item:
+                value['provider_usage'] = item['provider_usage']
+            return success(value)
     if kind == 'p8' or item['state'] == 'mapping_required':
         value = unknown_usage(record.public_id, period, source_type=kind)
         if 'provider_usage' in item:

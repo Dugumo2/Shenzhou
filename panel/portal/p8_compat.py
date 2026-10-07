@@ -196,10 +196,13 @@ def eligible_bindings():
     from django.db.models import F, Q
     from django.utils import timezone
     from .models import DeviceSubscription, Entitlement, Membership, P8SourceBinding
+    from .p8_entitlement import mappings, valid_mapping
     if getattr(settings, 'P8_COMPAT_ENABLED', False) is not True:
         return P8SourceBinding.objects.none()
     # 旧服务和设备UUID发生冲突时，禁止借新兼容入口获得不同资源。
-    return P8SourceBinding.objects.filter(owner__is_active=True,
+    claimed = mappings().values('p8_binding_id')
+    verified = [binding.p8_binding_id for binding in mappings() if valid_mapping(binding)]
+    ordinary = P8SourceBinding.objects.filter(owner__is_active=True,
         enabled=True, state='verified', revision__gte=1, verified_at__lte=timezone.now(),
         verified_by__is_active=True, verified_by__is_staff=True).filter(
         Q(legacy_membership__isnull=True) | Q(legacy_membership__user_id=F('owner_id'),
@@ -207,7 +210,8 @@ def eligible_bindings():
             owner__entitlement__isnull=True)).exclude(
         public_id__in=Entitlement.objects.values('public_id')).exclude(
         public_id__in=Membership.objects.values('public_id')).exclude(
-        public_id__in=DeviceSubscription.objects.values('public_id')).order_by('public_id')
+        public_id__in=DeviceSubscription.objects.values('public_id')).exclude(pk__in=claimed)
+    return P8SourceBinding.objects.filter(Q(pk__in=ordinary.values('pk')) | Q(pk__in=verified)).order_by('public_id')
 
 
 def _source_config(binding):
@@ -286,6 +290,15 @@ def _project(binding, *, detail=False):
         result['clients'] = [{'id': key, 'delivery': dict(delivery)} for key in ('windows', 'v2rayng', 'android')]
         result['clients'].append({'id': 'router', 'delivery': {
             'state': 'blocked', 'message': '路由器适配尚未验收。', 'download_url': None}})
+    from .p8_entitlement import current_entitlement
+    target = current_entitlement(binding)
+    if target is not None:
+        from .api_helpers import project_service
+        summary = project_service(target, 'entitlement')
+        for key in ('quota_bytes', 'quota_state', 'used_bytes', 'raw_bytes', 'remaining_bytes',
+                    'next_reset_at', 'expires_at', 'state', 'enabled', 'business_state',
+                    'status_label', 'usage', 'application'):
+            result[key] = summary[key]
     return result
 
 
@@ -299,7 +312,7 @@ def service_detail(user, public_id):
 
 
 def service_usage(user, public_id, period='current'):
-    """无个人计量来源，所有用量保持未知；不借用 Membership 或其他服务账本。"""
+    """只读取显式核验的同服务套餐；无映射时保持未知。"""
     from datetime import timedelta
     from zoneinfo import ZoneInfo
     from django.utils import timezone
@@ -308,6 +321,13 @@ def service_usage(user, public_id, period='current'):
     binding = current_binding(user, public_id)
     if binding is None:
         return None
+    from .p8_entitlement import current_entitlement
+    target = current_entitlement(binding)
+    if target is not None:
+        from .usage_api import _service
+        value = _service(target, 'entitlement', period, timezone.now())
+        value.update(service_id=str(binding.public_id), source_type='p8')
+        return value
     return unknown_usage(binding.public_id, period)
 
 

@@ -650,9 +650,12 @@ class P8SourceBinding(models.Model):
         if self.state == 'verified' and self.verification_sha256 != binding_verification_sha256(self):
             errors['verification_sha256'] = '归属或来源已变化，必须重新显式核验当前绑定。'
         if self.legacy_membership_id:
+            from .p8_entitlement import current_entitlement
+            mapped_target = current_entitlement(self) if self.pk else None
             if (self.legacy_membership.user_id != self.owner_id
                     or LegacyServiceBinding.objects.filter(membership_id=self.legacy_membership_id).exists()
-                    or Entitlement.objects.filter(user_id=self.owner_id).exists()):
+                    or Entitlement.objects.filter(user_id=self.owner_id).exclude(
+                        pk=mapped_target.pk if mapped_target is not None else None).exists()):
                 errors['legacy_membership'] = '会员归属冲突或已有其他权益映射，请先人工核对。'
         if errors:
             raise ValidationError(errors)
@@ -663,6 +666,41 @@ class P8SourceBinding(models.Model):
             models.CheckConstraint(condition=models.Q(revision__gte=1), name='p8_binding_positive_revision'),
             models.CheckConstraint(condition=models.Q(state__in=['unverified', 'verified', 'revoked']),
                                    name='p8_binding_known_state'),
+        ]
+
+
+class P8EntitlementBinding(models.Model):
+    """显式关联原交付与既有套餐；不保存凭据、不创建额度或账期。"""
+    p8_binding = models.OneToOneField(P8SourceBinding, on_delete=models.PROTECT,
+                                     related_name='entitlement_binding')
+    entitlement = models.OneToOneField(Entitlement, on_delete=models.PROTECT,
+                                      related_name='p8_entitlement_binding')
+    owner = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT,
+                              related_name='p8_entitlement_bindings')
+    state = models.CharField(max_length=12, default='unverified', choices=[
+        ('unverified', '未核验'), ('verified', '已核验'), ('revoked', '已撤销')])
+    revision = models.PositiveIntegerField(default=1)
+    snapshot = models.JSONField(default=dict)
+    snapshot_sha256 = models.CharField(max_length=64, blank=True, default='')
+    evidence_sha256 = models.CharField(max_length=64, blank=True, default='')
+    verification_sha256 = models.CharField(max_length=64, blank=True, default='')
+    verified_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True,
+                                    on_delete=models.PROTECT, related_name='verified_p8_entitlements')
+    verified_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def clean(self):
+        from django.core.exceptions import ValidationError
+        from .p8_entitlement import valid_mapping
+        if self.state == 'verified' and not valid_mapping(self):
+            raise ValidationError('套餐映射尚未核验或归属证据已经变化。')
+
+    class Meta:
+        constraints = [
+            models.CheckConstraint(condition=models.Q(revision__gte=1), name='p8_entitlement_positive_revision'),
+            models.CheckConstraint(condition=models.Q(state__in=['unverified', 'verified', 'revoked']),
+                                   name='p8_entitlement_known_state'),
         ]
 
 # 规则组合使用独立模块；与资源观测迁移分离，统一由portal注册。
