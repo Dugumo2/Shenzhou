@@ -310,33 +310,44 @@ def rotate_subscriptions(request):
 
 @require_http_methods(['GET', 'HEAD'])
 def download(request, token, device):
+    from .subscription_usage_headers import userinfo_for_service
+    from .usage_api import _read_snapshot
     try:
-        grant = grant_from_token(token, device)
+        with _read_snapshot():
+            grant = grant_from_token(token, device)
+            raw = read_artifact(settings.ARTIFACT_ROOT, grant.membership.public_id, device)
+            member = grant.membership
+            userinfo = userinfo_for_service(member.user, member.public_id)
     except ValidationError:
         raise Http404('订阅不可用。')
-    try:
-        raw = read_artifact(settings.ARTIFACT_ROOT, grant.membership.public_id, device)
     except (ArtifactError, OSError):
         raise Http404('订阅尚未发布。')
     response = FileResponse(BytesIO(raw), content_type='application/json' if device == 'android' else 'text/plain; charset=utf-8')
-    member = grant.membership
-    # 这里只提供面板自己的计量口径；生产计量未接入时不允许下载。
-    response['Subscription-Userinfo'] = f'upload=0; download={member.used_bytes}; total={member.quota_bytes}; expire={int(member.expires_at.timestamp())}'
+    if userinfo:
+        response['Subscription-Userinfo'] = userinfo
     return response
 
 
 @require_http_methods(['GET', 'HEAD'])
 def resource_download(request, token, artifact):
+    from .subscription_usage_headers import userinfo_for_service
+    from .usage_api import _read_snapshot
     if artifact not in RELEASE_ARTIFACTS or artifact in ('windows', 'android', 'v2rayng'):
         raise Http404('资源不存在。')
     device = RELEASE_ARTIFACTS[artifact][1]
     try:
-        grant = grant_from_token(token, device)
-        raw = read_artifact(settings.ARTIFACT_ROOT, grant.membership.public_id, artifact)
+        with _read_snapshot():
+            grant = grant_from_token(token, device)
+            raw = read_artifact(settings.ARTIFACT_ROOT, grant.membership.public_id, artifact)
+            member = grant.membership
+            userinfo = userinfo_for_service(member.user, member.public_id)
     except (ValidationError, ArtifactError, OSError):
         raise Http404('资源尚未发布。')
     content_type = 'application/octet-stream' if artifact.endswith(('geosite', 'geoip')) else 'application/json'
-    return FileResponse(BytesIO(raw), content_type=content_type)
+    response = FileResponse(BytesIO(raw), content_type=content_type)
+    if userinfo:
+        response['Subscription-Userinfo'] = userinfo
+    return response
 
 
 @staff_required

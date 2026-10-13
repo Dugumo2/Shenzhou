@@ -5,7 +5,6 @@ import re
 from pathlib import Path
 from django.conf import settings
 from django.core.exceptions import ValidationError
-from django.utils import timezone
 from .delivery import resolve_subscription
 
 FILENAMES = {'windows': ('subscription.txt', 'text/plain; charset=utf-8'),
@@ -73,11 +72,12 @@ def available(sub, resource='subscription'):
 
 
 def download_artifact(token, resource='subscription'):
-    sub = resolve_subscription(token)
-    content, content_type = _read(sub, resource)
-    record = sub.entitlement
-    now = timezone.now()
-    cycle = record.cycles.get(starts_at__lte=now, ends_at__gt=now)
-    # 入口双向合计作为 download 字段呈现，不声称单独下载流量。
-    userinfo = f'upload=0; download={cycle.used_bytes}; total={record.quota_bytes}; expire={int(record.expires_at.timestamp())}'
+    from .subscription_usage_headers import userinfo_for_service
+    from .usage_api import _read_snapshot
+    # 权限、当前来源、账期及标头使用同次只读快照，不把采样中的不同水位拼接。
+    with _read_snapshot():
+        sub = resolve_subscription(token)
+        content, content_type = _read(sub, resource)
+        record = sub.entitlement
+        userinfo = userinfo_for_service(record.user, record.public_id)
     return {'content': content, 'content_type': content_type, 'userinfo': userinfo}
