@@ -1,11 +1,8 @@
 """文件SQLite/WAL真实并发：套餐周期SELECT后新账提交，响应仍保持同一水位。"""
-import atexit
 import json
 from pathlib import Path
-import shutil
 import threading
 from unittest.mock import patch
-from uuid import uuid4
 
 from django.conf import settings
 from django.contrib.auth.models import AnonymousUser
@@ -18,28 +15,9 @@ from . import admin_api, api
 from .models import BillingCycle, UsageLedger, UsageStream
 from .read_snapshot import read_snapshot
 from .test_billing_schedule import BillingFixture, GB
-
-
-# 测试发现时为并发夹具选独立文件库，不改实际NAME或面板原数据库。
-_root = (settings.BASE_DIR / '.snapshot-read-test').resolve()
-_directory = _root / ('case-' + uuid4().hex)
-_directory.mkdir(parents=True)
-
-
-def _cleanup():
-    target = _directory.resolve()
-    if target.parent != _root or target == _root:
-        raise RuntimeError('snapshot_test_cleanup_scope_invalid')
-    if target.exists():
-        shutil.rmtree(target)
-    try:
-        _root.rmdir()
-    except OSError:
-        pass
-
-
-atexit.register(_cleanup)
-connections['default'].settings_dict.setdefault('TEST', {})['NAME'] = str(_directory / 'snapshot.sqlite3')
+# 复用安全测试已登记的独立文件库；不能第二次覆盖全局TEST.NAME破坏整批隔离断言。
+# 导入模块确保单独执行本测试时也采用同一文件库，不额外导入其中的测试类。
+from . import test_security as _security_database_fixture
 
 
 class ServiceReadSnapshotTests(BillingFixture, TransactionTestCase):
