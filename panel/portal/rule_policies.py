@@ -8,7 +8,7 @@ from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.utils import timezone
 
-from .client_rules import normal_domain, overlaps_protected
+from .client_rules import match_domain, normal_domain, overlaps_protected
 from .models import ClientDirectRule, OperationJob, RuleSourceVersion
 from .rule_policy_models import RulePolicy, RulePolicyVersion, RulePolicyBinding, RulePolicyCandidate
 from .rule_sources import SourceError, canonical, digest, normalize_document, verified_document, write_gate
@@ -246,9 +246,9 @@ def bind_policy(actor, policy_id, data):
 
 def explain(document, domain):
     try:
-        domain = normal_domain(domain)
-    except ValidationError:
-        raise SourceError('invalid_domain', '请输入完整有效域名。') from None
+        domain = match_domain(domain)
+    except ValidationError as exc:
+        raise SourceError('invalid_domain', exc.messages[0]) from None
     matches = []
     for index, entry in enumerate(document['entries']):
         row = entry['rule']

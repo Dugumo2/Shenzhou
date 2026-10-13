@@ -12,7 +12,7 @@ from django.db.models import F
 from django.utils import timezone
 
 from . import api
-from .client_rules import normal_domain, preview_rule, validate_rule
+from .client_rules import match_domain, normal_domain, preview_rule, validate_rule
 from .forms import ClientDirectRuleForm
 from .models import ClientDirectRule, OperationJob
 from .services import audit
@@ -330,9 +330,9 @@ def preview(request):
     try:
         data = _payload(request, ('domain',))
         try:
-            domain = _domain(data['domain'])
+            domain = match_domain(data['domain'])
         except ValidationError as exc:
-            raise RuleError('invalid_domain', '请输入有效的完整域名。', fields={'domain': exc.messages}) from None
+            raise RuleError('invalid_domain', '无法识别检查目标。', fields={'domain': exc.messages}) from None
         rows = list(ClientDirectRule.objects.order_by('pk'))
         invalid_ids = [r.pk for r in rows if not _valid(r)]
         valid_rows = [r for r in rows if r.pk not in invalid_ids]

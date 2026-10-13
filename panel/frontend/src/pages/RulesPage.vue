@@ -130,13 +130,13 @@ onUnmounted(()=>{generation++;reads++;checks++})
   <template v-if="data">
     <el-alert v-if="!isProduction&&!data.read_only" :title="data.message" type="info" :closable="false" show-icon class="spaced" />
 
-    <section class="surface admin-panel"><h2>域名命中检查</h2><p class="muted small">这里检查当前自建规则记录。需要同时解释来源、覆盖和显式顺序，请进入规则方案，选择已保存版本检查；本处未命中时仍不能推断完整方案。</p>
-      <form class="rule-inspect" @submit.prevent="inspect"><el-input v-model="matchDomain" aria-label="检查域名" placeholder="例如 api.example.com" clearable /><el-button native-type="submit" :loading="matchBusy" :disabled="!matchDomain.trim()">检查匹配</el-button></form>
+    <section class="surface admin-panel"><h2>域名命中检查</h2><p class="muted small">粘贴域名或完整网址，检查当前自建规则。网址只取主机名，端口、路径和查询参数不参与域名匹配。需要核对来源和顺序时，可进入规则方案。</p>
+      <form class="rule-inspect" @submit.prevent="inspect"><el-input v-model="matchDomain" aria-label="检查域名或网址" placeholder="例如 example.com 或 https://example.com/path" maxlength="4096" clearable /><el-button native-type="submit" :loading="matchBusy" :disabled="!matchDomain.trim()">检查匹配</el-button></form>
       <el-alert v-if="matchError" :title="matchError" type="error" :closable="false" class="spaced" />
       <div v-if="match" class="inline-note"><strong>{{match.domain}}：{{match.result==='invalid_candidate'?'记录含无效规则，无法确定':match.final_action?actions[match.final_action]:'未命中自建规则，最终动作待确认'}}</strong><p>{{match.matched_id?'命中规则 #'+match.matched_id:match.source_id==='protected'?'命中内置保护校验':''}}</p><p class="small">{{match.order_semantics}}</p><p v-for="conflict in match.conflicts" :key="conflict.rule_id+conflict.message">{{conflict.message}}</p>
         <p class="small">记录版本：{{match.candidate_revision.slice(0,12)}} · 来源：{{match.source_id==='protected'?'内置保护校验':match.source_id==='custom'?'自建规则':'未命中已知来源'}}</p><p v-if="matchStale" class="small">匹配快照与当前列表版本不同，请刷新列表后重新检查。</p>
         <el-table v-if="match.related.length" :data="match.related"><el-table-column label="相关规则" prop="value" min-width="220" /><el-table-column label="动作"><template #default="{row}">{{actions[row.action]}}</template></el-table-column><el-table-column label="关系"><template #default="{row}">{{relations[row.relation]||row.relation}}</template></el-table-column><el-table-column label="域名匹配"><template #default="{row}">{{row.enabled?(row.matched?'匹配':'不匹配'):'已禁用，不参与命中'}}</template></el-table-column></el-table>
-        <p v-if="match.related_truncated" class="small">相关条目较多，仅展示部分。</p><p class="small muted">{{isProduction?'此结果只解释当前记录，最终以发布版本和客户端应用结果为准。':match.message}}</p>
+        <p v-if="match.related_truncated" class="small">相关条目较多，仅展示部分。</p><p class="small muted">这里只解释该主机的规则，不会访问网址或检测连通性；网页图片、样式和跳转后的其他域名需要分别检查。实际连接以客户端已加载规则和连接记录为准。</p>
       </div>
     </section>
     <section class="surface admin-panel"><div class="section-title"><h2>自建规则</h2><el-input v-model="search" aria-label="搜索规则" placeholder="搜索域名或正则范围" clearable class="rule-search" /></div>

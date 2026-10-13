@@ -360,9 +360,19 @@ class CandidateRuleAPITests(TestCase):
         self.assertNotIn('private-invalid-token', json.dumps(value))
 
     def test_invalid_preview_domain_returns_field_error(self):
-        for domain in ('https://example.com', '192.168.1.1', 'localhost', {}, 3):
+        for domain in ('ftp://example.com', '192.168.1.1', 'localhost', {}, 3):
             error = self.assert_error(self.send('post', {'domain': domain}, ROOT + '/preview'), 422, 'invalid_domain')
             self.assertTrue(error['field_errors']['domain'])
+
+    def test_url_preview_extracts_host_and_preserves_suffix_boundaries(self):
+        rule = ClientDirectRule.objects.create(creator=self.admin, kind='suffix', value='edu.cn', outbound='direct')
+        value = self.send('post', {'domain': 'http://lib-cuit-edu-cn-s.webvpn.cuit.edu.cn:8118/index?private=value'}, ROOT + '/preview').json()['data']
+        self.assertEqual(value['domain'], 'lib-cuit-edu-cn-s.webvpn.cuit.edu.cn')
+        self.assertEqual(value['matched_id'], rule.pk)
+        self.assertEqual(value['final_action'], 'client_direct')
+        self.assertNotIn('private=value', json.dumps(value))
+        other = self.send('post', {'domain': 'https://edu.cn.example.com/path'}, ROOT + '/preview').json()['data']
+        self.assertIsNone(other['matched_id'])
 
     def test_legacy_ip_shaped_domain_is_redacted_and_cannot_authorize_preview(self):
         row = ClientDirectRule.objects.create(creator=self.admin, kind='exact', value='169.254.169.254')

@@ -2,8 +2,10 @@
 from __future__ import annotations
 
 import hashlib
+import ipaddress
 import json
 import re
+from urllib.parse import urlsplit
 
 from django.core.exceptions import ValidationError
 
@@ -36,6 +38,34 @@ def normal_domain(value: str) -> str:
     if len(value) > 253 or not DOMAIN.fullmatch(value):
         raise ValidationError('请输入完整域名，例如 example.com。')
     return value
+
+
+def match_domain(value: str) -> str:
+    """检查入口可粘贴网址；只提取主机，不请求网址，也不放宽规则保存格式。"""
+    message = '请输入域名或完整 HTTP/HTTPS 网址，例如 example.com 或 https://example.com/path。'
+    if (type(value) is not str or len(value) > 4096
+            or any(ord(char) < 32 or ord(char) == 127 for char in value)):
+        raise ValidationError(message)
+    value = value.strip()
+    if not value or '\\' in value or any(char.isspace() for char in value):
+        raise ValidationError(message)
+    try:
+        parsed = urlsplit(value if '://' in value else '//' + value)
+        if (parsed.scheme and parsed.scheme.lower() not in ('http', 'https')
+                or not parsed.netloc or parsed.username is not None or parsed.password is not None
+                or '%' in parsed.netloc or parsed.netloc.endswith(':')):
+            raise ValueError()
+        port = parsed.port
+        if port is not None and not 1 <= port <= 65535:
+            raise ValueError()
+        domain = normal_domain(parsed.hostname)
+    except (ValueError, UnicodeError, ValidationError):
+        raise ValidationError(message) from None
+    try:
+        ipaddress.ip_address(domain)
+    except ValueError:
+        return domain
+    raise ValidationError('这里只检查域名规则；IP 地址需单独核对 IP 路由。')
 
 
 def overlaps_protected(domain: str) -> bool:
