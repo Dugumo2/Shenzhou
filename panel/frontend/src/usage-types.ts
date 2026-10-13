@@ -1,5 +1,6 @@
 import { integerBytes, usagePercent } from './display.ts'
 import type { ProviderUsage } from './providerUsage'
+import type { UsageEstimate } from './types'
 
 export type UsagePeriod = 'current' | '7d' | '30d' | 'month' | 'year'
 export type CalendarPeriod = '7d' | 'month' | 'year'
@@ -30,7 +31,7 @@ export interface UsageOverviewData {
   generated_at: string; period: UsagePeriod
   current_cycle: { starts_at: string; ends_at: string } | null
   summary: UsageTotals & { quota_bytes: UsageBytes; quota_state: 'applied' | 'configured' | 'unknown'; remaining_bytes: UsageBytes; next_reset_at: string | null
-    recorded_used_bytes?: UsageBytes; recorded_upload_bytes?: UsageBytes; recorded_download_bytes?: UsageBytes }
+    recorded_used_bytes?: UsageBytes; recorded_upload_bytes?: UsageBytes; recorded_download_bytes?: UsageBytes; usage_estimate?: UsageEstimate | null }
   quality: { state: 'measured' | 'stale' | 'gap' | 'unknown'; message: string; collected_at: string | null }
   history: { kind: 'confirmed_ledger_postings'; date_basis: 'created_at'; range_start: string | null; range_end: string | null
     totals: UsageTotals | null; record_count: number; excluded_record_count: number; days: UsageDay[]

@@ -20,7 +20,7 @@ const data = computed(() => props.managed ? props.snapshot || null : reader.data
 const busy = computed(() => props.managed ? !!props.loading : reader.busy.value)
 const error = computed(() => props.managed ? props.loadError || '' : reader.error.value)
 const headingId = computed(() => 'usage-' + props.serviceId + (props.summaryOnly ? '-summary' : '-detail'))
-const qualityLabel = computed(() => data.value?.quality.state === 'unknown' && integerBytes(data.value.summary.recorded_used_bytes ?? null) !== null
+const qualityLabel = computed(() => data.value?.summary.usage_estimate ? '套餐用量' : data.value?.quality.state === 'unknown' && integerBytes(data.value.summary.recorded_used_bytes ?? null) !== null
   ? '部分用量已记录' : ({ measured: '当前用量已确认', stale: '显示上次记录', gap: '部分时段缺少记录', unknown: '尚未取得用量记录' })[data.value?.quality.state || 'unknown'])
 const periods: { id: CalendarPeriod; label: string }[] = [{ id: '7d', label: '近7天' }, { id: 'month', label: '本月' }, { id: 'year', label: '今年' }]
 function load() {

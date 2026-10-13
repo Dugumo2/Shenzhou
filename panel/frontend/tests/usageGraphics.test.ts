@@ -120,6 +120,18 @@ function temporal(data: UsageOverviewData, period: '7d' | 'month' | 'year' = '7d
   return data
 }
 
+test('一次迁入沿用标准套餐界面，时间图不混入旧量基数', async () => {
+  const data=temporal(overview());data.quality.state='gap';data.summary.charged_bytes=null;data.summary.remaining_bytes=null
+  data.summary.quota_bytes='1000000000000'
+  data.summary.usage_estimate={state:'estimated',used_bytes:'98253546067',remaining_bytes:'901746453933',upload_bytes:'33734964678',download_bytes:'64518581389'}
+  const summary=await renderOverview(data,true)
+  assert.match(summary,/套餐已用/);assert.match(summary,/剩余流量/);assert.doesNotMatch(summary,/估算|迁入/)
+  assert.match(summary,/98\.25 GB/);assert.match(summary,/901\.74 GB/)
+  for(const name of ['quota-gauge','transfer-composition'])assert.match(summary,new RegExp('data-chart="'+name+'"'))
+  const timeline=await renderOverview(data,false)
+  assert.match(timeline,/近7天/);assert.doesNotMatch(timeline,/98\.25 GB|901\.74 GB/)
+})
+
 test('用户概览忽略旧provider原件，仍保留一份套餐圆环和原始上下行构成', async () => {
   const data = temporal(overview()); data.source_type='p8'
   data.provider_usage={schema_version:2,generated_at:data.generated_at,meters:[meter(),meter({id:'two',label:'资源乙'})]}

@@ -31,11 +31,16 @@ export function usagePercent(used: Bytes, quota: Bytes): number | null {
   if (u === null || q === null || q === 0n) return null
   return Math.min(100, Number(u * 100n / q))
 }
-export function serviceUsage(service: Service): { bytes: Bytes; label: string; mode: 'current' | 'last' | 'recorded' | 'unknown' } {
+export function serviceUsage(service: Service): { bytes: Bytes; label: string; mode: 'current' | 'last' | 'recorded' | 'estimated' | 'unknown' } {
   if (integerBytes(service.used_bytes) !== null) return { bytes: service.used_bytes,
     label: service.usage.quality === 'measured' ? '本期已用' : '上次已确认用量', mode: service.usage.quality === 'measured' ? 'current' : 'last' }
+  if (service.usage_estimate?.state === 'estimated' && integerBytes(service.usage_estimate.used_bytes) !== null)
+    return { bytes: service.usage_estimate.used_bytes, label: '套餐已用', mode: 'estimated' }
   if (integerBytes(service.recorded_used_bytes ?? null) !== null) return { bytes: service.recorded_used_bytes ?? null, label: '已记录用量', mode: 'recorded' }
   return { bytes: null, label: '用量（待核算）', mode: 'unknown' }
+}
+export function serviceRemaining(service: Service): Bytes {
+  return service.remaining_bytes ?? (serviceUsage(service).mode === 'estimated' ? service.usage_estimate?.remaining_bytes ?? null : null)
 }
 export function shiftLabel(seconds: number): string {
   if (seconds === 0) return '重置时间保持不变'

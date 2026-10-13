@@ -24,7 +24,7 @@ const summarySnapshot = computed<UsageOverviewData | null>(() => {
   const value = service.value
   if (!value || usageSnapshot.accessDenied.value) return null
   return { service_id: value.id, source_type: value.source_type, time_zone: 'Asia/Shanghai', generated_at: value.usage.updated_at || new Date().toISOString(), period: '7d', current_cycle: null,
-    summary: { quota_bytes: value.quota_bytes?.toString() ?? null, quota_state: value.quota_state || 'unknown', charged_bytes: value.used_bytes?.toString() ?? null,
+    summary: { usage_estimate: value.usage_estimate ?? null, quota_bytes: value.quota_bytes?.toString() ?? null, quota_state: value.quota_state || 'unknown', charged_bytes: value.used_bytes?.toString() ?? null,
       recorded_used_bytes: value.recorded_used_bytes?.toString() ?? null, recorded_upload_bytes: value.recorded_upload_bytes?.toString() ?? null, recorded_download_bytes: value.recorded_download_bytes?.toString() ?? null,
       remaining_bytes: value.remaining_bytes?.toString() ?? null, upload_bytes: value.recorded_upload_bytes?.toString() ?? null, download_bytes: value.recorded_download_bytes?.toString() ?? null, next_reset_at: value.next_reset_at },
     quality: { state: 'unknown', message: '', collected_at: value.usage.updated_at },

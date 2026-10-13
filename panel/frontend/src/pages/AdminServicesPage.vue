@@ -4,7 +4,7 @@ import { auth } from '../auth'
 import { retainResourceList } from '../resourceSnapshot'
 import { useSnapshotRequest } from '../useSnapshotRequest'
 import { useSessionIdentity } from '../useSessionIdentity'
-import { formatDate, formatGB, serviceUsage } from '../display'
+import { formatDate, formatGB, serviceRemaining, serviceUsage } from '../display'
 import type { Pagination, Service } from '../types'
 import BillingDrawer from '../components/BillingDrawer.vue'
 import RefreshControl from '../components/RefreshControl.vue'
@@ -33,8 +33,8 @@ watch(identity, () => { selectedId.value = null; snapshot.reset(); void load() }
     <div class="table-scroll"><el-table v-loading="initialLoading" :data="items" row-key="id" empty-text="没有符合条件的服务">
       <el-table-column label="用户 / 服务编号" min-width="185"><template #default="{ row }"><strong>{{ row.user?.username }}</strong><div class="small muted">神舟云 #{{ row.id.slice(0, 8) }}</div><div class="small muted">{{ row.source_type === 'p8' ? '原订阅资源' : row.source_type === 'membership' ? '会员登记' : '服务权益' }}</div></template></el-table-column>
       <el-table-column label="总额度" min-width="120"><template #default="{ row }">{{ formatGB(row.quota_bytes) }}<div v-if="row.quota_state === 'configured'" class="small muted">待应用</div></template></el-table-column>
-      <el-table-column label="已用" min-width="130"><template #default="{ row }">{{ formatGB(serviceUsage(row).bytes, '暂无可靠统计') }}<div v-if="serviceUsage(row).mode === 'recorded'" class="small muted">已记录用量</div><div v-else-if="serviceUsage(row).mode === 'last'" class="small muted">上次已确认</div></template></el-table-column>
-      <el-table-column label="剩余" min-width="110"><template #default="{ row }">{{ formatGB(row.remaining_bytes, '待核算') }}</template></el-table-column>
+      <el-table-column label="已用" min-width="130"><template #default="{ row }">{{ formatGB(serviceUsage(row).bytes, '暂无可靠统计') }}<div v-if="serviceUsage(row).mode === 'estimated'" class="small muted">套餐已用</div><div v-else-if="serviceUsage(row).mode === 'recorded'" class="small muted">已记录用量</div><div v-else-if="serviceUsage(row).mode === 'last'" class="small muted">上次已确认</div></template></el-table-column>
+      <el-table-column label="剩余" min-width="110"><template #default="{ row }">{{ formatGB(serviceRemaining(row), '待核算') }}</template></el-table-column>
       <el-table-column label="到期时间" min-width="175"><template #default="{ row }">{{ formatDate(row.expires_at) }}</template></el-table-column>
       <el-table-column label="状态" min-width="130"><template #default="{ row }"><el-tag :type="row.business_state === 'active' ? 'success' : 'info'">{{ row.status_label }}</el-tag></template></el-table-column>
       <el-table-column label="操作" min-width="130"><template #default="{ row }"><el-button v-if="row.actions?.billing" link type="primary" @click="selectedId = row.id">重置时间</el-button><span v-if="!row.actions?.billing" class="small muted">暂不可调整</span></template></el-table-column>

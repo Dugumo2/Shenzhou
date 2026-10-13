@@ -10,6 +10,9 @@ export function quotaGauge(data: UsageOverviewData) {
   const used = integerBytes(data.summary.charged_bytes), total = integerBytes(data.summary.quota_bytes)
   const reliable = reliableUsagePercent(data)
   if (reliable !== null && used !== null && total !== null) return { mode: 'current', percent: boundedPercent(used, total) }
+  const estimated = integerBytes(data.summary.usage_estimate?.used_bytes ?? null)
+  if (used === null && data.summary.usage_estimate?.state === 'estimated' && data.summary.quota_state === 'applied'
+      && estimated !== null && total !== null && total > 0n) return { mode: 'estimated', percent: boundedPercent(estimated, total) }
   // 过期样本只能画最后确认占比；灰色部分不得表示可用余额。
   if (data.quality.state === 'stale' && data.summary.quota_state === 'applied' && data.current_cycle
       && used !== null && total !== null && total > 0n) return { mode: 'recorded', percent: boundedPercent(used, total) }
@@ -19,8 +22,9 @@ export function quotaGauge(data: UsageOverviewData) {
   return { mode: 'unknown', percent: null }
 }
 export function transferShare(data: UsageOverviewData) {
-  const up = integerBytes(data.summary.recorded_upload_bytes ?? data.summary.upload_bytes)
-  const down = integerBytes(data.summary.recorded_download_bytes ?? data.summary.download_bytes)
+  const estimate = data.summary.charged_bytes === null ? data.summary.usage_estimate : null
+  const up = integerBytes(estimate?.upload_bytes ?? data.summary.recorded_upload_bytes ?? data.summary.upload_bytes)
+  const down = integerBytes(estimate?.download_bytes ?? data.summary.recorded_download_bytes ?? data.summary.download_bytes)
   if (up === null || down === null) return null
   return { upPercent: boundedPercent(up, up + down), downPercent: boundedPercent(down, up + down), total: (up + down).toString(), empty: up + down === 0n }
 }

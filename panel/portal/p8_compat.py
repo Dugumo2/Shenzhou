@@ -279,7 +279,7 @@ def _project(binding, *, detail=False):
     result = {'id': str(binding.public_id), 'source_type': 'p8', 'name': '神舟云',
         'quota_bytes': None, 'quota_state': 'unknown', 'used_bytes': None, 'raw_bytes': None,
         'recorded_used_bytes': None, 'recorded_upload_bytes': None, 'recorded_download_bytes': None,
-        'remaining_bytes': None, 'next_reset_at': None, 'expires_at': None,
+        'remaining_bytes': None, 'next_reset_at': None, 'expires_at': None, 'usage_estimate': None,
         'state': 'verification_required', 'enabled': True, 'business_state': 'verification_required',
         'status_label': '订阅已接入',
         'usage': {'quality': 'unknown', 'updated_at': None, 'message': '暂无可靠统计，当前用量和剩余待核算。'},
@@ -298,6 +298,7 @@ def _project(binding, *, detail=False):
         summary = project_service(target, 'entitlement')
         for key in ('quota_bytes', 'quota_state', 'used_bytes', 'raw_bytes', 'remaining_bytes',
                     'recorded_used_bytes', 'recorded_upload_bytes', 'recorded_download_bytes',
+                    'usage_estimate',
                     'next_reset_at', 'expires_at', 'state', 'enabled', 'business_state',
                     'status_label', 'usage', 'application'):
             result[key] = summary[key]
@@ -344,6 +345,7 @@ def unknown_usage(public_id, period='current', *, source_type='p8'):
     return {'service_id': str(public_id), 'source_type': source_type, 'time_zone': 'Asia/Shanghai',
         'generated_at': now.isoformat(), 'period': period, 'current_cycle': None,
         'summary': {'quota_bytes': None, 'quota_state': 'unknown', 'charged_bytes': None,
+                    'usage_estimate': None,
                     'recorded_used_bytes': None, 'recorded_upload_bytes': None, 'recorded_download_bytes': None,
                     'upload_bytes': None, 'download_bytes': None, 'remaining_bytes': None, 'next_reset_at': None},
         'quality': {'state': 'unknown', 'message': '暂无可靠统计，当前用量和剩余待核算。', 'collected_at': None},

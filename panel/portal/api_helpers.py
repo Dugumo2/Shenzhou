@@ -3,6 +3,7 @@ from django.db.models import Count, Exists, F, OuterRef, Q, Sum
 from django.utils import timezone
 
 from .metering_quality import FUTURE_SKEW, assess_metering
+from .display_estimate import project_estimate
 from .legacy_binding import legacy_service_memberships, verified_legacy_bindings
 from .models import Entitlement, LegacyServiceBinding, UsageLedger
 
@@ -131,7 +132,9 @@ def service_facts(record, source_type, now):
     return {'quota': quota, 'used': used, 'raw': raw, 'observed': observed, 'quality': quality,
             'quota_state': quota_state, 'state': state, 'enabled': enabled, 'is_applied': is_applied,
             'application': application, 'next_reset': next_reset, 'expires': expires,
-            'remaining': remaining, **recorded}
+            'remaining': remaining, **recorded,
+            'usage_estimate': project_estimate(record, cycle, quota, recorded, now)
+                if source_type == 'entitlement' and quota_state == 'applied' and used is None else None}
 
 
 def service_business_status(record, source_type, facts, now):
@@ -203,10 +206,12 @@ def project_service(record, source_type, *, now=None, detail=False, administrato
               'quota_bytes': byte_string(quota), 'quota_state': facts['quota_state'],
               'used_bytes': byte_string(used), 'raw_bytes': byte_string(raw), 'remaining_bytes': byte_string(remaining),
               **{key: facts[key] for key in ('recorded_used_bytes', 'recorded_upload_bytes', 'recorded_download_bytes')},
+              'usage_estimate': facts['usage_estimate'],
               'next_reset_at': iso(facts['next_reset']), 'expires_at': iso(facts['expires']),
               'state': facts['state'], 'enabled': facts['enabled'],
               'business_state': business_state, 'status_label': status_label,
-              'usage': {'quality': quality, 'updated_at': iso(facts['observed']), 'message': usage_messages[quality]},
+              'usage': {'quality': quality, 'updated_at': facts['usage_estimate']['as_of'] if facts['usage_estimate'] else iso(facts['observed']),
+                        'message': '查看本期套餐用量。' if facts['usage_estimate'] else usage_messages[quality]},
               'application': facts['application'], 'delivery': delivery,
               'actions': {'billing': administrator and source_type == 'entitlement', 'quota': False, 'renew': False,
                           'grants': False, 'enable': False, 'reset': False}}

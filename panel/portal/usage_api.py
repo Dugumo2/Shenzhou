@@ -84,6 +84,7 @@ def _service(record, source_type, period, now):
             'current_cycle': {'starts_at': iso(cycle.starts_at), 'ends_at': iso(cycle.ends_at)} if cycle else None,
             'summary': {'quota_bytes': projection['quota_bytes'], 'quota_state': projection['quota_state'],
                         'charged_bytes': projection['used_bytes'],
+                        'usage_estimate': projection['usage_estimate'],
                         **{key: projection[key] for key in ('recorded_used_bytes', 'recorded_upload_bytes', 'recorded_download_bytes')},
                         'upload_bytes': projection['recorded_upload_bytes'],
                         'download_bytes': projection['recorded_download_bytes'],

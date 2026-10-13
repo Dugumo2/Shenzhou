@@ -40,6 +40,7 @@ def service_queries(owner=None):
 
 
 def unresolved(item):
+    item['usage_estimate'] = None
     for key in ('quota_bytes', 'used_bytes', 'raw_bytes', 'remaining_bytes', 'next_reset_at', 'expires_at'):
         item[key] = None
     for key in ('recorded_used_bytes', 'recorded_upload_bytes', 'recorded_download_bytes'):
