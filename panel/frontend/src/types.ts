@@ -12,6 +12,7 @@ export interface Compatibility { state: string; message: string | null }
 export interface Service {
   provider_usage?: ProviderUsage
   id: string; name: string; quota_bytes: Bytes; used_bytes: Bytes; raw_bytes: Bytes
+  recorded_used_bytes?: Bytes; recorded_upload_bytes?: Bytes; recorded_download_bytes?: Bytes
   remaining_bytes: Bytes; next_reset_at: string | null; expires_at: string | null
   state: string; enabled: boolean; status_label: string; source_type: 'entitlement' | 'membership' | 'p8'
   capabilities?: { billing: boolean; quota: boolean; renew: boolean; grants: boolean; enable: boolean; reset: boolean; p8_delivery: boolean }

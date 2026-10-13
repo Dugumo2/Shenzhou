@@ -223,7 +223,9 @@ test('旧会员地址别名加载后标题、用量和连接均使用同一正�
 
 test('用量接口初次失败保留已知套餐图数据，后续撤权同时清空父服务', async()=>{
   let status=0
-  const service={id:'service-a',source_type:'p8',quota_bytes:'100000000000',used_bytes:null,remaining_bytes:null,quota_state:'applied',next_reset_at:null,expires_at:null,usage:{quality:'unknown',updated_at:null,message:''},delivery:{download_url:null},clients:[]}
+  const service={id:'service-a',source_type:'p8',quota_bytes:'100000000000',used_bytes:null,remaining_bytes:null,
+    recorded_used_bytes:'40000000000',recorded_upload_bytes:'12000000000',recorded_download_bytes:'18000000000',
+    quota_state:'applied',next_reset_at:null,expires_at:null,usage:{quality:'unknown',updated_at:null,message:''},delivery:{download_url:null},clients:[]}
   const ui=mount('pages/ServicePage.vue',{}, {
     '../auth':{auth:vue.reactive({session:{authenticated:true,user:{username:'owner-a'},environment:{is_demo:false}}})},
     'vue-router':{useRoute:()=>vue.reactive({params:{id:'service-a'}})},
@@ -236,6 +238,9 @@ test('用量接口初次失败保留已知套餐图数据，后续撤权同时�
   await flush()
   assert.equal(ui.state.summarySnapshot.value.summary.quota_bytes,'100000000000')
   assert.equal(ui.state.summarySnapshot.value.summary.remaining_bytes,null)
+  assert.equal(ui.state.summarySnapshot.value.summary.recorded_used_bytes,'40000000000')
+  assert.equal(ui.state.summarySnapshot.value.summary.recorded_upload_bytes,'12000000000')
+  assert.equal(ui.state.summarySnapshot.value.summary.recorded_download_bytes,'18000000000')
   assert.equal(ui.state.service.value.id,'service-a')
   status=403;await ui.state.load();await flush()
   assert.equal(ui.state.service.value,null);assert.equal(ui.state.summarySnapshot.value,null)

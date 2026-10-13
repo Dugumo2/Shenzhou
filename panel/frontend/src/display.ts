@@ -1,4 +1,4 @@
-import type { Bytes } from './types.ts'
+import type { Bytes, Service } from './types.ts'
 export function integerBytes(value: Bytes): bigint | null {
   if (value === null) return null
   if (typeof value === 'number') return Number.isSafeInteger(value) && value >= 0 ? BigInt(value) : null
@@ -30,6 +30,12 @@ export function usagePercent(used: Bytes, quota: Bytes): number | null {
   const u = integerBytes(used), q = integerBytes(quota)
   if (u === null || q === null || q === 0n) return null
   return Math.min(100, Number(u * 100n / q))
+}
+export function serviceUsage(service: Service): { bytes: Bytes; label: string; mode: 'current' | 'last' | 'recorded' | 'unknown' } {
+  if (integerBytes(service.used_bytes) !== null) return { bytes: service.used_bytes,
+    label: service.usage.quality === 'measured' ? '本期已用' : '上次已确认用量', mode: service.usage.quality === 'measured' ? 'current' : 'last' }
+  if (integerBytes(service.recorded_used_bytes ?? null) !== null) return { bytes: service.recorded_used_bytes ?? null, label: '已记录用量', mode: 'recorded' }
+  return { bytes: null, label: '用量（待核算）', mode: 'unknown' }
 }
 export function shiftLabel(seconds: number): string {
   if (seconds === 0) return '重置时间保持不变'

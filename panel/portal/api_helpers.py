@@ -1,10 +1,10 @@
 """服务查询的安全只读投影；不创建账期、交付或接入身份。"""
-from django.db.models import Exists, OuterRef, Q
+from django.db.models import Count, Exists, OuterRef, Q, Sum
 from django.utils import timezone
 
-from .metering_quality import assess_metering
+from .metering_quality import FUTURE_SKEW, assess_metering
 from .legacy_binding import legacy_service_memberships, verified_legacy_bindings
-from .models import Entitlement, LegacyServiceBinding
+from .models import Entitlement, LegacyServiceBinding, UsageLedger
 
 
 CLIENTS = (
@@ -63,6 +63,24 @@ def service_queryset():
     return Entitlement.objects.select_related('user')
 
 
+def current_recorded_totals(record, cycle, now):
+    """只汇总当前唯一周期中同服务身份的确认行，不把部分量升格为完整余额。"""
+    empty = {'recorded_used_bytes': None, 'recorded_upload_bytes': None, 'recorded_download_bytes': None}
+    if cycle is None or cycle.entitlement_id != record.pk:
+        return empty
+    values = UsageLedger.objects.filter(cycle=cycle, cycle__entitlement__user_id=record.user_id,
+        stream__identity__subscription__entitlement=record,
+        stream__identity__subscription__entitlement__user_id=record.user_id,
+        quality='metered', weighted_bytes__gte=0, upload_delta__gte=0, download_delta__gte=0,
+        observed_at__gte=cycle.starts_at, observed_at__lte=min(cycle.ends_at, now + FUTURE_SKEW), created_at__lte=now).aggregate(
+            count=Count('pk'), used=Sum('weighted_bytes'), upload=Sum('upload_delta'), download=Sum('download_delta'))
+    if not values['count']:
+        return empty
+    return {'recorded_used_bytes': byte_string(values['used']),
+        'recorded_upload_bytes': byte_string(values['upload']),
+        'recorded_download_bytes': byte_string(values['download'])}
+
+
 def service_facts(record, source_type, now):
     """只从现有记录核对状态依据；业务筛选与页面投影复用同一份事实。"""
     gap = False
@@ -99,10 +117,12 @@ def service_facts(record, source_type, now):
     expires = record.expires_at
     remaining = (max(0, quota - used) if quality == 'measured' and quota_state == 'applied'
                  and used is not None and byte_string(quota) is not None else None)
+    recorded = current_recorded_totals(record, cycle, now) if source_type == 'entitlement' else {
+        'recorded_used_bytes': None, 'recorded_upload_bytes': None, 'recorded_download_bytes': None}
     return {'quota': quota, 'used': used, 'raw': raw, 'observed': observed, 'quality': quality,
             'quota_state': quota_state, 'state': state, 'enabled': enabled, 'is_applied': is_applied,
             'application': application, 'next_reset': next_reset, 'expires': expires,
-            'remaining': remaining}
+            'remaining': remaining, **recorded}
 
 
 def service_business_status(record, source_type, facts, now):
@@ -173,6 +193,7 @@ def project_service(record, source_type, *, now=None, detail=False, administrato
     result = {'id': str(record.public_id), 'source_type': source_type, 'name': '神舟云',
               'quota_bytes': byte_string(quota), 'quota_state': facts['quota_state'],
               'used_bytes': byte_string(used), 'raw_bytes': byte_string(raw), 'remaining_bytes': byte_string(remaining),
+              **{key: facts[key] for key in ('recorded_used_bytes', 'recorded_upload_bytes', 'recorded_download_bytes')},
               'next_reset_at': iso(facts['next_reset']), 'expires_at': iso(facts['expires']),
               'state': facts['state'], 'enabled': facts['enabled'],
               'business_state': business_state, 'status_label': status_label,

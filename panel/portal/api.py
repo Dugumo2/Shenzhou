@@ -20,6 +20,7 @@ from .api_helpers import (CLIENTS, client_catalog, compatibility_for, iso, legac
 from .legacy_binding import verified_legacy_bindings
 from .client_rules import PROTECTED, policy_document, validate_rule
 from .models import BillingCycle, ClientDirectRule, Entitlement
+from .read_snapshot import read_snapshot
 from .services import audit, throttle
 
 
@@ -130,6 +131,7 @@ def logout(request):
 
 
 @endpoint()
+@read_snapshot()
 def my_services(request):
     from .service_projection import owner_compatibility, project_index, service_index
     items = project_index(service_index(request.user), viewer=request.user)
@@ -144,6 +146,7 @@ def unresolved_p8_service(item):
 
 
 @endpoint()
+@read_snapshot()
 def my_service_detail(request, public_id):
     from .service_projection import project, resolve
     result = resolve(request.user, public_id)
@@ -179,6 +182,7 @@ def page_options(request):
 
 
 @endpoint(staff=True)
+@read_snapshot()
 def admin_services(request):
     from .service_projection import project_index, service_index
     options, failure = page_options(request)

@@ -29,7 +29,8 @@ export interface UsageOverviewData {
   service_id: string; source_type: 'entitlement' | 'membership' | 'p8'; time_zone: 'Asia/Shanghai'
   generated_at: string; period: UsagePeriod
   current_cycle: { starts_at: string; ends_at: string } | null
-  summary: UsageTotals & { quota_bytes: UsageBytes; quota_state: 'applied' | 'configured' | 'unknown'; remaining_bytes: UsageBytes; next_reset_at: string | null }
+  summary: UsageTotals & { quota_bytes: UsageBytes; quota_state: 'applied' | 'configured' | 'unknown'; remaining_bytes: UsageBytes; next_reset_at: string | null
+    recorded_used_bytes?: UsageBytes; recorded_upload_bytes?: UsageBytes; recorded_download_bytes?: UsageBytes }
   quality: { state: 'measured' | 'stale' | 'gap' | 'unknown'; message: string; collected_at: string | null }
   history: { kind: 'confirmed_ledger_postings'; date_basis: 'created_at'; range_start: string | null; range_end: string | null
     totals: UsageTotals | null; record_count: number; excluded_record_count: number; days: UsageDay[]

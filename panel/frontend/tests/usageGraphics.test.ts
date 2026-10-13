@@ -83,6 +83,36 @@ async function renderOverview(data: UsageOverviewData, summaryOnly = false) {
   return html
 }
 
+test('部分已记录金额在实际列表/概览保留原圆环与原始图，不声称余额',async()=>{
+  const data=overview();data.source_type='p8';data.quality.state='gap'
+  data.summary.charged_bytes=null;data.summary.remaining_bytes=null
+  data.summary.recorded_used_bytes='40000000000';data.summary.recorded_upload_bytes='12000000000';data.summary.recorded_download_bytes='18000000000'
+  const service={id:data.service_id,name:'神舟云',source_type:'p8',quota_bytes:'100000000000',used_bytes:null,raw_bytes:null,
+    recorded_used_bytes:'40000000000',recorded_upload_bytes:'12000000000',recorded_download_bytes:'18000000000',remaining_bytes:null,
+    next_reset_at:'2026-11-01T00:00:00+08:00',expires_at:'2027-01-19T00:00:00+08:00',state:'active',enabled:true,status_label:'计量缺口',quota_state:'applied',usage:{quality:'gap',updated_at:data.generated_at,message:'部分时段缺少记录'},delivery:{state:'unknown',message:'',download_url:null}}
+  const responses={'/me/services/graphics-fixture':service,'/me/services/graphics-fixture/usage?period=7d':data,
+    '/catalog/clients':{items:[]},'/me/services':{items:[service],compatibility:{state:'ready',message:null}}}
+  const detail=await renderEntry('pages/ServicePage.vue',{},responses),list=await renderEntry('pages/ServicesPage.vue',{},responses)
+  for(const html of [detail.html,list.html]){assert.match(html,/40 GB/);assert.match(html,/已记录/);assert.match(html,/待核算/);assert.doesNotMatch(html,/60 GB/)}
+  assert.match(detail.html,/已记录占比/);assert.match(detail.html,/40%/);assert.match(detail.html,/30 GB/)
+  assert.equal((detail.html.match(/data-chart="quota-gauge"/g)||[]).length,1)
+  assert.equal((detail.html.match(/data-chart="transfer-composition"/g)||[]).length,1)
+  for(const text of ['服务概览','流量用量','连接设置','手机','电脑','路由器'])assert.ok(detail.html.includes(text),text)
+  assert.equal((detail.html.match(/class="refresh-control/g)||[]).length,1)
+})
+
+test('部分真实零与无确认行的概览均保留图形，不把无记录填零',async()=>{
+  const data=overview();data.quality.state='unknown';data.summary.charged_bytes=null;data.summary.remaining_bytes=null
+  data.summary.upload_bytes=null;data.summary.download_bytes=null
+  data.summary.recorded_used_bytes='0';data.summary.recorded_upload_bytes='0';data.summary.recorded_download_bytes='0'
+  const zero=await renderOverview(data,true)
+  assert.match(zero,/部分用量已记录/);assert.match(zero,/已记录占比/);assert.match(zero,/0%/);assert.match(zero,/已确认记录为零/)
+  data.summary.recorded_used_bytes=null;data.summary.recorded_upload_bytes=null;data.summary.recorded_download_bytes=null
+  const missing=await renderOverview(data,true)
+  assert.match(missing,/尚未取得用量记录/);assert.match(missing,/占比待核算/);assert.doesNotMatch(missing,/0%|已确认记录为零/)
+  for(const html of [zero,missing])for(const chart of ['quota-gauge','transfer-composition'])assert.match(html,new RegExp('data-chart="'+chart+'"'))
+})
+
 function temporal(data: UsageOverviewData, period: '7d' | 'month' | 'year' = '7d') {
   const values = period === 'year' ? [null,null,null,null,null,null,null,null,'60000000000','40000000000',null,null] : ['0','4000000000','6000000000','0','10000000000','8000000000','12000000000']
   data.period = period

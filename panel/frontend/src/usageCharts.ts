@@ -13,10 +13,14 @@ export function quotaGauge(data: UsageOverviewData) {
   // 过期样本只能画最后确认占比；灰色部分不得表示可用余额。
   if (data.quality.state === 'stale' && data.summary.quota_state === 'applied' && data.current_cycle
       && used !== null && total !== null && total > 0n) return { mode: 'recorded', percent: boundedPercent(used, total) }
+  const recorded = integerBytes(data.summary.recorded_used_bytes ?? null)
+  if (data.summary.quota_state === 'applied' && recorded !== null && total !== null && total > 0n)
+    return { mode: 'recorded', percent: boundedPercent(recorded, total) }
   return { mode: 'unknown', percent: null }
 }
 export function transferShare(data: UsageOverviewData) {
-  const up = integerBytes(data.summary.upload_bytes), down = integerBytes(data.summary.download_bytes)
+  const up = integerBytes(data.summary.recorded_upload_bytes ?? data.summary.upload_bytes)
+  const down = integerBytes(data.summary.recorded_download_bytes ?? data.summary.download_bytes)
   if (up === null || down === null) return null
   return { upPercent: boundedPercent(up, up + down), downPercent: boundedPercent(down, up + down), total: (up + down).toString(), empty: up + down === 0n }
 }

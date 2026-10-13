@@ -48,3 +48,12 @@ test('长期账期最多显示90天，非法记录日期不会成为图点',()=>
   const bars=historyBars(d,'charged');assert.equal(bars.length,90);assert.equal(bars.at(-1)?.date,'2026-10-03')
   assert.ok(bars.every(b=>b.date!=='2026-02-31'))
 })
+
+test('部分账的已记录占比不产生余额，真实0与缺字段分开',()=>{
+  const data=sample();data.quality.state='gap';data.summary.charged_bytes=null;data.summary.remaining_bytes=null
+  data.summary.recorded_used_bytes='40';data.summary.recorded_upload_bytes='12';data.summary.recorded_download_bytes='18'
+  assert.deepEqual(quotaGauge(data),{mode:'recorded',percent:40})
+  assert.equal(transferShare(data)?.total,'30');assert.equal(data.summary.remaining_bytes,null)
+  data.summary.recorded_used_bytes='0';assert.deepEqual(quotaGauge(data),{mode:'recorded',percent:0})
+  data.summary.recorded_used_bytes=null;assert.equal(quotaGauge(data).percent,null)
+})

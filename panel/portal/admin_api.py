@@ -10,6 +10,7 @@ from .api_helpers import iso, legacy_services, project_service, service_queryset
 from .legacy_binding import verified_legacy_bindings
 from .models import Entitlement
 from .service_projection import owner_compatibility, project_index, service_index
+from .read_snapshot import read_snapshot
 
 
 def users_query():
@@ -88,6 +89,7 @@ def users(request):
 
 
 @endpoint(staff=True)
+@read_snapshot()
 def user_detail(request, user_id):
     if not user_id.isascii() or not user_id.isdecimal() or len(user_id) > 18:
         return error('not_found', '用户不存在或不可访问。', 404)

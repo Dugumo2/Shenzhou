@@ -30,6 +30,17 @@ function service(changes: Partial<Service> = {}): Service {
     user: { username: 'fixture-admin' }, actions: { billing: false, quota: false, renew: false, grants: false, enable: false, reset: false }, ...changes }
 }
 
+test('管理员订阅列表与本人服务明细显示同份已记录金额，未知余额不派生',async()=>{
+  const partial=service({quota_bytes:'100000000000',quota_state:'applied',recorded_used_bytes:'40000000000',
+    recorded_upload_bytes:'12000000000',recorded_download_bytes:'18000000000',usage:{quality:'gap',updated_at:'2026-10-13T01:00:00Z',message:'部分时段缺少记录'}})
+  for(const page of ['AdminServicesPage.vue','AdminUserPage.vue']){
+    const {html}=await renderPage(page,[partial])
+    assert.match(html,/40 GB/);assert.match(html,/已记录用量/);assert.match(html,/待核算/)
+    assert.doesNotMatch(html,/60 GB|73 GB|120 GB/)
+    assert.equal((html.match(/class="refresh-control/g)||[]).length,1)
+  }
+})
+
 // 真实管理页面与真实资源组件；只替换HTTP、Session和Element宿主，不复制业务模板。
 async function renderPage(page: string, services: Service[], openUsage = false) {
   const cache = new Map<string, any>(), requests: string[] = []

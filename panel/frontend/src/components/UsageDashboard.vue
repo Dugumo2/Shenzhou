@@ -7,13 +7,17 @@ import type { UsageOverviewData } from '../usage-types'
 const props = defineProps<{ data: UsageOverviewData; compact?: boolean }>()
 const metric = ref<ChartMetric>('charged'), selectedDate = ref('')
 const gauge = computed(() => quotaGauge(props.data)), transfer = computed(() => transferShare(props.data))
+const recordedOnly = computed(() => integerBytes(props.data.summary.charged_bytes) === null && integerBytes(props.data.summary.recorded_used_bytes ?? null) !== null)
+const displayedUsed = computed(() => recordedOnly.value ? props.data.summary.recorded_used_bytes ?? null : props.data.summary.charged_bytes)
+const displayedUpload = computed(() => props.data.summary.recorded_upload_bytes ?? props.data.summary.upload_bytes)
+const displayedDownload = computed(() => props.data.summary.recorded_download_bytes ?? props.data.summary.download_bytes)
 const bars = computed(() => historyBars(props.data, metric.value))
 const selected = computed(() => bars.value.find(point => point.date === selectedDate.value))
 const stride = computed(() => Math.max(1, Math.ceil(bars.value.length / 7)))
 const gaugeStyle = computed(() => gauge.value.percent === null ? {} : {
   background: `conic-gradient(${gauge.value.mode === 'recorded' ? '#b7791f' : '#3155df'} ${gauge.value.percent}%, #e8edf5 0)`,
 })
-const gaugeLabel = computed(() => gauge.value.mode === 'current' ? '当前已用占比' : gauge.value.mode === 'recorded' ? '上次确认占比' : '占比待核算')
+const gaugeLabel = computed(() => gauge.value.mode === 'current' ? '当前已用占比' : gauge.value.mode === 'recorded' ? recordedOnly.value ? '已记录占比' : '上次确认占比' : '占比待核算')
 function bytes(value: string | null) { const n = integerBytes(value); return n !== null && n > 0n && n < 10_000_000n ? '< 0.01 GB' : formatGB(value, '待核算') }
 function pointLabel(point: { date: string; value: string | null }) { return point.date + '：' + (point.value === null ? '暂无已确认记录，不代表零流量' : bytes(point.value)) }
 watch(() => [props.data.service_id, props.data.period, metric.value], () => { selectedDate.value = '' })
@@ -27,16 +31,16 @@ watch(() => [props.data.service_id, props.data.period, metric.value], () => { se
         <div class="quota-ring" :class="{unknown: gauge.percent === null}" :style="gaugeStyle" role="img" data-chart="quota-gauge" :aria-label="gaugeLabel + (gauge.percent === null ? '' : ' ' + gauge.percent + '%')">
           <div class="ring-center"><span>{{ gaugeLabel }}</span><strong>{{ gauge.percent === null ? '—' : gauge.percent + '%' }}</strong></div>
         </div>
-        <dl class="quota-legend"><div><dt>本期额度</dt><dd>{{ bytes(data.summary.quota_bytes) }}</dd></div><div><dt>{{ gauge.mode === 'current' ? '套餐已用' : '已记录用量' }}</dt><dd>{{ bytes(data.summary.charged_bytes) }}</dd></div><div><dt>剩余流量</dt><dd>{{ bytes(data.summary.remaining_bytes) }}</dd></div></dl>
+        <dl class="quota-legend"><div><dt>本期额度</dt><dd>{{ bytes(data.summary.quota_bytes) }}</dd></div><div><dt>{{ gauge.mode === 'current' ? '套餐已用' : '已记录用量' }}</dt><dd>{{ bytes(displayedUsed) }}</dd></div><div><dt>剩余流量</dt><dd>{{ bytes(data.summary.remaining_bytes) }}</dd></div></dl>
       </div>
-      <p class="chart-note">{{ gauge.mode === 'recorded' ? '仅表示上次确认的用量占比；灰色部分不代表当前可用余额。' : gauge.mode === 'unknown' ? '统计或额度尚未确认，暂不绘制占比。' : '按已应用额度及已确认套餐用量计算。' }}</p>
+      <p class="chart-note">{{ gauge.mode === 'recorded' ? recordedOnly ? '仅表示已记录部分的用量占比；灰色部分不代表当前可用余额。' : '仅表示上次确认的用量占比；灰色部分不代表当前可用余额。' : gauge.mode === 'unknown' ? '统计或额度尚未确认，暂不绘制占比。' : '按已应用额度及已确认套餐用量计算。' }}</p>
     </article>
     <article class="dashboard-card" aria-label="已确认上传下载构成">
-      <h3>已确认传输量</h3><p class="chart-note">本期原始传输量，未乘流量倍率。</p>
+      <h3>{{ recordedOnly ? '已记录传输量' : '已确认传输量' }}</h3><p class="chart-note">{{ recordedOnly ? '本期已记录部分的原始传输量，未乘流量倍率；缺失时段未补齐。' : '本期原始传输量，未乘流量倍率。' }}</p>
       <div class="transfer-total"><strong>{{ transfer ? bytes(transfer.total) : '待核算' }}</strong><span>上传 + 下载</span></div>
       <div v-if="transfer && !transfer.empty" class="transfer-bar" role="img" data-chart="transfer-composition" :aria-label="'已确认上传占比 ' + transfer.upPercent + '%，下载占比 ' + transfer.downPercent + '%'"><span class="upload" :style="{width:transfer.upPercent+'%'}"></span><span class="download" :style="{width:transfer.downPercent+'%'}"></span></div>
       <div v-else class="transfer-empty" data-chart="transfer-composition" role="img" :aria-label="transfer ? '已确认上传和下载均为零' : '上传下载尚未记录'">{{ transfer ? '已确认记录为零' : '等待可靠统计' }}</div>
-      <dl class="transfer-legend"><div><dt><i class="upload"></i>上传</dt><dd>{{ bytes(data.summary.upload_bytes) }}</dd></div><div><dt><i class="download"></i>下载</dt><dd>{{ bytes(data.summary.download_bytes) }}</dd></div></dl>
+      <dl class="transfer-legend"><div><dt><i class="upload"></i>上传</dt><dd>{{ bytes(displayedUpload) }}</dd></div><div><dt><i class="download"></i>下载</dt><dd>{{ bytes(displayedDownload) }}</dd></div></dl>
     </article>
   </div>
   <figure v-if="!compact" class="history-chart" aria-label="按记录日期的流量统计柱图">

@@ -1,10 +1,8 @@
 """R03/R08 本人服务用量只读投影；入账日期不代表流量发生日期。"""
 import uuid
-from contextlib import contextmanager
 from datetime import timedelta
 from zoneinfo import ZoneInfo
 
-from django.db import connection, transaction
 from django.db.models import Count, Sum
 from django.db.models.functions import TruncDate
 from django.utils import timezone
@@ -14,6 +12,7 @@ from .api_helpers import byte_string, iso, project_service, service_queryset, vi
 from .legacy_binding import verified_legacy_bindings
 from .metering_quality import FUTURE_SKEW
 from .models import UsageLedger
+from .read_snapshot import read_snapshot as _read_snapshot
 
 
 SHANGHAI = ZoneInfo('Asia/Shanghai')
@@ -72,7 +71,6 @@ def _service(record, source_type, period, now):
         records = UsageLedger.objects.filter(cycle__entitlement=record,
             stream__identity__subscription__entitlement=record, created_at__lte=now)
         current_records = records.filter(cycle=cycle) if cycle else None
-    _, current_totals = _totals(_confirmed(current_records, now)) if current_records is not None else (0, None)
     if period == 'current':
         start, end = (cycle.starts_at, cycle.ends_at) if cycle else (None, None)
         selected = current_records
@@ -86,29 +84,14 @@ def _service(record, source_type, period, now):
             'current_cycle': {'starts_at': iso(cycle.starts_at), 'ends_at': iso(cycle.ends_at)} if cycle else None,
             'summary': {'quota_bytes': projection['quota_bytes'], 'quota_state': projection['quota_state'],
                         'charged_bytes': projection['used_bytes'],
-                        'upload_bytes': current_totals['upload_bytes'] if current_totals else None,
-                        'download_bytes': current_totals['download_bytes'] if current_totals else None,
+                        **{key: projection[key] for key in ('recorded_used_bytes', 'recorded_upload_bytes', 'recorded_download_bytes')},
+                        'upload_bytes': projection['recorded_upload_bytes'],
+                        'download_bytes': projection['recorded_download_bytes'],
                         'remaining_bytes': projection['remaining_bytes'],
                         'next_reset_at': projection['next_reset_at']},
             'quality': {'state': projection['usage']['quality'], 'message': projection['usage']['message'],
                         'collected_at': projection['usage']['updated_at']},
             'history': _history(selected, start, end, now)}
-
-
-@contextmanager
-def _read_snapshot():
-    """SQLite使用延迟只读快照；不为图表查询取得写预留锁。"""
-    connection.ensure_connection()
-    prior = getattr(connection, 'transaction_mode', None)
-    change = connection.vendor == 'sqlite' and not connection.in_atomic_block
-    if change:
-        connection.transaction_mode = 'DEFERRED'
-    try:
-        with transaction.atomic():
-            yield
-    finally:
-        if change:
-            connection.transaction_mode = prior
 
 
 @endpoint()

@@ -42,6 +42,8 @@ def service_queries(owner=None):
 def unresolved(item):
     for key in ('quota_bytes', 'used_bytes', 'raw_bytes', 'remaining_bytes', 'next_reset_at', 'expires_at'):
         item[key] = None
+    for key in ('recorded_used_bytes', 'recorded_upload_bytes', 'recorded_download_bytes'):
+        item[key] = None
     item.update(state='mapping_required', business_state='mapping_required', enabled=False,
                 status_label='资料待核对', quota_state='unknown')
     item['usage'] = {'quality': 'unknown', 'updated_at': None, 'message': '来源关联需要重新核对，当前额度与用量暂不可确认。'}
