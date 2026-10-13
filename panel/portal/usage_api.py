@@ -8,7 +8,7 @@ from django.db.models.functions import TruncDate
 from django.utils import timezone
 
 from .api import endpoint, error, success
-from .api_helpers import byte_string, iso, project_service, service_queryset, visible_legacy_services
+from .api_helpers import byte_string, confirmed_ledger, iso, project_service, service_queryset, visible_legacy_services
 from .legacy_binding import verified_legacy_bindings
 from .metering_quality import FUTURE_SKEW
 from .models import UsageLedger
@@ -31,7 +31,7 @@ def _totals(queryset):
 
 
 def _confirmed(queryset, now):
-    return queryset.filter(quality='metered', weighted_bytes__isnull=False,
+    return confirmed_ledger(queryset).filter(weighted_bytes__isnull=False,
                            observed_at__lte=now + FUTURE_SKEW)
 
 

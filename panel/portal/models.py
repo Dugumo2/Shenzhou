@@ -382,6 +382,7 @@ class UsageLedger(models.Model):
     download_delta = models.PositiveBigIntegerField()
     rate_version = models.ForeignKey('LineRateVersion', null=True, blank=True, on_delete=models.PROTECT)
     grant_rate_version = models.ForeignKey('ServiceRateVersion', null=True, blank=True, on_delete=models.PROTECT)
+    ingress_sample = models.ForeignKey('IngressUsageSample', null=True, blank=True, on_delete=models.PROTECT)
     # 旧流水不回填发生区间；新采样有边界证据时才填写。
     interval_start = models.DateTimeField(null=True, blank=True)
     interval_end = models.DateTimeField(null=True, blank=True)
@@ -475,6 +476,10 @@ class IngressUsageSample(models.Model):
     interval_start = models.DateTimeField(null=True, blank=True)
     fingerprint = models.CharField(max_length=64)
     coverage_verified = models.BooleanField(default=False)
+    # 确认累计差分与完整覆盖分开；窗口只存时间，不保存统计用户名。
+    observation_verified = models.BooleanField(default=False)
+    read_windows = models.JSONField(default=dict)
+    source_config_fingerprint = models.CharField(max_length=64, blank=True, default='')
     status = models.CharField(max_length=16, choices=[
         ('baseline', '起始基线'), ('accepted', '区间已入账'), ('gap', '区间缺口'), ('late', '迟到样本')])
     reason_code = models.CharField(max_length=40, blank=True)
@@ -482,6 +487,29 @@ class IngressUsageSample(models.Model):
     class Meta:
         constraints = [models.UniqueConstraint(fields=['identity', 'epoch', 'sequence'], name='unique_ingress_sample')]
         indexes = [models.Index(fields=['entitlement', 'observed_at'], name='ingress_service_time')]
+
+
+class JournalImportCheckpoint(models.Model):
+    """同目标账库的导入水位；不创建套餐或独立计费总量。"""
+    bridge_ref = models.CharField(max_length=80, unique=True)
+    entitlement = models.ForeignKey(Entitlement, on_delete=models.PROTECT)
+    observer_fingerprint = models.CharField(max_length=64)
+    mapping_fingerprint = models.CharField(max_length=64)
+    last_sequence = models.PositiveBigIntegerField(default=0)
+    updated_at = models.DateTimeField(auto_now=True)
+
+
+class JournalImportReceipt(models.Model):
+    """源批指纹/目标样本与checkpoint在同事务保存，失败不能跳水位。"""
+    checkpoint = models.ForeignKey(JournalImportCheckpoint, on_delete=models.PROTECT)
+    source_sequence = models.PositiveBigIntegerField()
+    source_fingerprint = models.CharField(max_length=64)
+    result = models.CharField(max_length=16)
+    sample_ids = models.JSONField(default=list)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=['checkpoint', 'source_sequence'], name='unique_journal_import_receipt')]
 
 
 class CapacityPool(models.Model):

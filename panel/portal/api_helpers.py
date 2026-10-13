@@ -1,5 +1,5 @@
 """服务查询的安全只读投影；不创建账期、交付或接入身份。"""
-from django.db.models import Count, Exists, OuterRef, Q, Sum
+from django.db.models import Count, Exists, F, OuterRef, Q, Sum
 from django.utils import timezone
 
 from .metering_quality import FUTURE_SKEW, assess_metering
@@ -63,16 +63,25 @@ def service_queryset():
     return Entitlement.objects.select_related('user')
 
 
+def confirmed_ledger(queryset):
+    """部分确认行必须关联同一真实采样，不能靠手填quality借他人样本。"""
+    return queryset.filter(Q(quality='metered') | Q(quality='partial_observed',
+        ingress_sample__status='accepted', ingress_sample__observation_verified=True,
+        ingress_sample__coverage_verified=False, ingress_sample__identity_id=F('stream__identity_id'),
+        ingress_sample__epoch=F('stream__epoch'), ingress_sample__sequence=F('sequence'),
+        ingress_sample__source_config_fingerprint__regex=r'^[a-f0-9]{64}$'))
+
+
 def current_recorded_totals(record, cycle, now):
     """只汇总当前唯一周期中同服务身份的确认行，不把部分量升格为完整余额。"""
     empty = {'recorded_used_bytes': None, 'recorded_upload_bytes': None, 'recorded_download_bytes': None}
     if cycle is None or cycle.entitlement_id != record.pk:
         return empty
-    values = UsageLedger.objects.filter(cycle=cycle, cycle__entitlement__user_id=record.user_id,
+    values = confirmed_ledger(UsageLedger.objects.filter(cycle=cycle, cycle__entitlement__user_id=record.user_id,
         stream__identity__subscription__entitlement=record,
         stream__identity__subscription__entitlement__user_id=record.user_id,
-        quality='metered', weighted_bytes__gte=0, upload_delta__gte=0, download_delta__gte=0,
-        observed_at__gte=cycle.starts_at, observed_at__lte=min(cycle.ends_at, now + FUTURE_SKEW), created_at__lte=now).aggregate(
+        weighted_bytes__gte=0, upload_delta__gte=0, download_delta__gte=0,
+        observed_at__gte=cycle.starts_at, observed_at__lte=min(cycle.ends_at, now + FUTURE_SKEW), created_at__lte=now)).aggregate(
             count=Count('pk'), used=Sum('weighted_bytes'), upload=Sum('upload_delta'), download=Sum('download_delta'))
     if not values['count']:
         return empty

@@ -1,6 +1,7 @@
 """内部累计采样账：只接受已归属入口，不启动采集器或调用核心。"""
 import hashlib
 import json
+import re
 from datetime import datetime, timedelta, timezone as datetime_timezone
 
 from django.core.exceptions import PermissionDenied, ValidationError
@@ -13,10 +14,33 @@ from .models import (AuditEvent, BillingCycle, CoreInstance, Entitlement, Ingres
                      Line, NodeIdentity, ServiceRateVersion, UsageLedger, UsageStream)
 
 MAX_BYTES = 2**63 - 1
+WINDOW_FIELDS = ('read_started_at', 'read_ended_at', 'upload_read_started_at', 'upload_read_ended_at',
+                 'download_read_started_at', 'download_read_ended_at')
 
 
 def _aware(value):
     return isinstance(value, datetime) and timezone.is_aware(value)
+
+
+def _read_windows(values, observed_at):
+    """封闭原始双向窗口；代表观察时间不能冒充两向同时取值。"""
+    if type(values) is not dict or set(values) != set(WINDOW_FIELDS):
+        raise ValidationError('必须保留完整双向读取窗口')
+    result = {}
+    for key, value in values.items():
+        try:
+            value = datetime.fromisoformat(value) if type(value) is str else value
+        except ValueError:
+            raise ValidationError('读取窗口时间无效') from None
+        if not _aware(value):
+            raise ValidationError('读取窗口时间无效')
+        result[key] = value.astimezone(datetime_timezone.utc)
+    ordered = [result[key] for key in WINDOW_FIELDS[2:]]
+    if (result['read_started_at'] != ordered[0] or result['read_ended_at'] != ordered[-1]
+            or any(left > right for left, right in zip(ordered, ordered[1:]))
+            or result['read_ended_at'] != observed_at or ordered[-1]-ordered[0] > timedelta(seconds=10)):
+        raise ValidationError('双向读取窗口顺序或观察点不一致')
+    return {key: value.isoformat() for key, value in result.items()}
 
 
 def _grant(record, line_id, ingress_id):
@@ -62,7 +86,8 @@ def set_service_rate(actor, entitlement_id, line_id, ingress_id, multiplier, eff
 @transaction.atomic
 def record_ingress_sample(*, identity_id, server_id, core_instance_id, epoch, sequence,
                           upload_bytes, download_bytes, observed_at, coverage_verified,
-                          counter_kind, accounting_layer='ingress'):
+                          counter_kind, accounting_layer='ingress', observation_verified=False,
+                          read_windows=None, source_config_fingerprint=''):
     """coverage_verified 由受信调用方核实前锚到本次的完整性，不能从累计值自动推定。"""
     now = timezone.now()
     if accounting_layer != 'ingress':
@@ -75,6 +100,15 @@ def record_ingress_sample(*, identity_id, server_id, core_instance_id, epoch, se
         raise ValidationError('无效累计样本')
     if not _aware(observed_at) or observed_at > now + timedelta(seconds=30):
         raise ValidationError('样本时间无效')
+    if type(observation_verified) is not bool:
+        raise ValidationError('必须明确累计观测核验状态')
+    windows = {}
+    if observation_verified:
+        if coverage_verified or type(source_config_fingerprint) is not str or not re.fullmatch(r'[a-f0-9]{64}', source_config_fingerprint):
+            raise ValidationError('部分观测不得冒用完整覆盖，且必须核实实际配置')
+        windows = _read_windows(read_windows, observed_at)
+    elif read_windows is not None or source_config_fingerprint:
+        raise ValidationError('未核验观测不得混入读取窗口或配置证明')
     initial = NodeIdentity.objects.select_related('subscription').get(pk=identity_id)
     record = Entitlement.objects.select_for_update().get(pk=initial.subscription.entitlement_id)
     # 同权益锁下重新读取归属；与旧路径共用锁，避免切换时重复扣账。
@@ -104,6 +138,8 @@ def record_ingress_sample(*, identity_id, server_id, core_instance_id, epoch, se
     body = [identity.pk, record.pk, anchors, core.pk, epoch, sequence, upload_bytes, download_bytes,
             observed_at.astimezone(datetime_timezone.utc).isoformat(), coverage_verified,
             counter_kind, accounting_layer]
+    if observation_verified:
+        body.extend([True, windows, source_config_fingerprint])
     fingerprint = hashlib.sha256(json.dumps(body, separators=(',', ':')).encode()).hexdigest()
     existing = IngressUsageSample.objects.filter(identity=identity, epoch=epoch, sequence=sequence).first()
     if existing:
@@ -119,6 +155,8 @@ def record_ingress_sample(*, identity_id, server_id, core_instance_id, epoch, se
         **anchors,
         epoch=epoch, sequence=sequence, upload_bytes=upload_bytes, download_bytes=download_bytes,
         observed_at=observed_at, fingerprint=fingerprint, coverage_verified=coverage_verified,
+        observation_verified=observation_verified, read_windows=windows,
+        source_config_fingerprint=source_config_fingerprint,
         interval_start=previous.observed_at if previous else None)
 
     def save_status(status, reason='', *, advance=False, retire=False):
@@ -150,39 +188,52 @@ def record_ingress_sample(*, identity_id, server_id, core_instance_id, epoch, se
         return save_status('baseline', 'initial_baseline' if previous is None else 'epoch_changed', advance=True)
     if upload_bytes < previous.upload_bytes or download_bytes < previous.download_bytes:
         return save_status('gap', 'counter_reversed', advance=True, retire=True)
-    if not coverage_verified:
+    partial = observation_verified and not coverage_verified
+    if partial and (not previous.observation_verified or previous.source_config_fingerprint != source_config_fingerprint
+                    or not previous.read_windows):
+        return save_status('gap', 'observation_contract_changed', advance=True)
+    if partial and datetime.fromisoformat(windows['read_started_at']) < datetime.fromisoformat(previous.read_windows['read_ended_at']):
+        return save_status('late', 'read_window_reversed')
+    if not coverage_verified and not partial:
         return save_status('gap', 'coverage_unverified', advance=True)
     raw = upload_bytes - previous.upload_bytes + download_bytes - previous.download_bytes
+    interval_start = datetime.fromisoformat(previous.read_windows['read_started_at']) if partial else previous.observed_at
+    sample.interval_start = interval_start
     # 以实际区间核对已确定账期；端点属于刚结束的旧期，迟到不改变发生归属。
     # 检查任何重叠账期，既不猜分跨期流量，也不调用自动推进/创建账期的方法。
     cycles = list(BillingCycle.objects.select_for_update().filter(entitlement=record,
-        starts_at__lt=observed_at, ends_at__gt=previous.observed_at).order_by('pk')[:2])
-    if (len(cycles) != 1 or cycles[0].starts_at > previous.observed_at
+        starts_at__lt=observed_at, ends_at__gt=interval_start).order_by('pk')[:2])
+    if (len(cycles) != 1 or cycles[0].starts_at > interval_start
             or cycles[0].ends_at < observed_at):
         return save_status('gap', 'cycle_boundary', advance=True)
     cycle = cycles[0]
     if not record.expires_at or observed_at > record.expires_at:
         return save_status('gap', 'outside_service_period', advance=True)
     rates = ServiceRateVersion.objects.filter(entitlement=record, line_id=identity.line_id, ingress_id=identity.ingress_id)
-    version = rates.filter(effective_at__lte=previous.observed_at).order_by('-effective_at', '-pk').first()
+    version = rates.filter(effective_at__lte=interval_start).order_by('-effective_at', '-pk').first()
     if version is None:
         return save_status('gap', 'rate_missing', advance=True)
-    if rates.filter(effective_at__gt=previous.observed_at, effective_at__lt=observed_at).exists():
+    if rates.filter(effective_at__gt=interval_start, effective_at__lt=observed_at).exists():
         return save_status('gap', 'rate_boundary', advance=True)
     units = int(version.multiplier * RATE_SCALE)
     charged, remainder = divmod(raw * units + cycle.weighted_remainder, RATE_SCALE)
     if (cycle.used_bytes + charged > MAX_BYTES or
             (cycle.raw_bytes is not None and cycle.raw_bytes + raw > MAX_BYTES)):
         raise ValidationError('累计超出安全存储范围')
-    UsageLedger.objects.create(cycle=cycle, stream=stream, sequence=sequence,
+    # 部分金额可以入账，但不把不完整历史或非原子窗口提升为全覆盖。
+    sample.status, sample.reason_code = 'accepted', 'partial_observed' if partial else ''
+    sample.save()
+    UsageLedger.objects.create(cycle=cycle, stream=stream, sequence=sequence, ingress_sample=sample,
         upload_delta=upload_bytes - previous.upload_bytes, download_delta=download_bytes - previous.download_bytes,
-        weighted_bytes=charged, grant_rate_version=version, quality='metered',
-        observed_at=observed_at, interval_start=previous.observed_at, interval_end=observed_at)
+        weighted_bytes=charged, grant_rate_version=version, quality='partial_observed' if partial else 'metered',
+        observed_at=observed_at, interval_start=interval_start, interval_end=observed_at)
     cycle.used_bytes += charged
     cycle.weighted_remainder = remainder
     if cycle.raw_bytes is not None:
         cycle.raw_bytes += raw
     cycle.save(update_fields=['used_bytes', 'raw_bytes', 'weighted_remainder'])
     record.usage_updated_at = max(record.usage_updated_at or observed_at, observed_at)
-    record.save(update_fields=['usage_updated_at'])
-    return save_status('accepted', advance=True)
+    if partial:
+        record.metering_gap = True
+    record.save(update_fields=['usage_updated_at', 'metering_gap'])
+    return save_status('accepted', 'partial_observed' if partial else '', advance=True)

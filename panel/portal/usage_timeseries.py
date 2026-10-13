@@ -171,7 +171,8 @@ def _read(entitlement, period, now, cursor, include_lines):
     unallocated, lines = [], {}
     offset = restored['offset'] if restored else 0
     last_end = {}
-    rows = all_rows.filter(interval_start__lt=now).filter(pk__lte=watermark, quality='metered', weighted_bytes__isnull=False,
+    from .api_helpers import confirmed_ledger
+    rows = confirmed_ledger(all_rows).filter(interval_start__lt=now).filter(pk__lte=watermark, weighted_bytes__isnull=False,
         interval_end__gt=start, interval_start__lt=F('interval_end'),
         interval_end__lte=F('observed_at'), observed_at__lte=now,
         cycle__starts_at__lte=F('interval_start'), cycle__ends_at__gte=F('interval_end'),
@@ -180,7 +181,9 @@ def _read(entitlement, period, now, cursor, include_lines):
         grant_rate_version__ingress_id=F('stream__identity__ingress_id')).filter(
             Q(stream__identity__revoked_at__isnull=True) | Q(stream__identity__revoked_at__gte=F('interval_end')))
     fields = ('pk', 'interval_start', 'interval_end', 'weighted_bytes', 'upload_delta', 'download_delta',
-        'stream__identity_id', 'stream__identity__line_id', 'stream__identity__ingress_id', 'grant_rate_version_id')
+        'stream__identity_id', 'stream__identity__line_id', 'stream__identity__ingress_id', 'grant_rate_version_id', 'quality',
+        'ingress_sample__observation_verified', 'ingress_sample__coverage_verified', 'ingress_sample__source_config_fingerprint',
+        'ingress_sample__identity_id', 'ingress_sample__epoch', 'ingress_sample__sequence', 'stream__epoch', 'sequence')
     if include_lines:
         fields += ('stream__identity__line__public_id', 'stream__identity__line__name', 'stream__identity__ingress__name')
     for row in rows.order_by('interval_start', 'pk').values(*fields).iterator(chunk_size=1000):
@@ -194,9 +197,12 @@ def _read(entitlement, period, now, cursor, include_lines):
                 or any(value < 0 for value in _amount(row))):
             continue
         identity = row['stream__identity_id']
-        if identity in last_end and left < last_end[identity]:
-            raise TimeseriesUnavailable('overlapping_intervals')
-        last_end[identity] = right
+        partial = row['quality'] == 'partial_observed'
+        # 相邻累计差分各自唯一；非原子包络可重叠，不能按时间误判重复金额。
+        if not partial:
+            if identity in last_end and left < last_end[identity]:
+                raise TimeseriesUnavailable('overlapping_intervals')
+            last_end[identity] = right
         touched = buckets[max(0, bisect_right(bucket_starts, left) - 1):bisect_left(bucket_starts, right)]
         if left < start or right > now:
             boundary_count += 1
@@ -206,10 +212,12 @@ def _read(entitlement, period, now, cursor, include_lines):
         values = _amount(row)
         _add(totals, values)
         count += 1
-        coverage.add(identity, left, right)
+        if not partial:
+            coverage.add(identity, left, right)
         allocated = len(touched) == 1
         for bucket in touched:
-            bucket['coverage'].add(identity, left, right)
+            if not partial:
+                bucket['coverage'].add(identity, left, right)
             if allocated:
                 _add(bucket['values'], values)
                 bucket['count'] += 1
