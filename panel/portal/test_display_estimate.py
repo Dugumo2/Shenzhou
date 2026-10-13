@@ -66,6 +66,17 @@ class DisplayEstimateTests(BillingFixture, TestCase):
         self.ledger.delete()
         self.assertIsNone(self.result()['usage_estimate'])
 
+    def test_changing_next_reset_on_same_cycle_preserves_opening_but_next_cycle_does_not_inherit(self):
+        original_end=self.cycle.ends_at
+        self.cycle.ends_at += timedelta(days=2)
+        self.cycle.save(update_fields=['ends_at'])
+        self.assertEqual(self.result()['usage_estimate']['used_bytes'],str(10*GB))
+        self.assertEqual(project_service(self.record,'entitlement',now=original_end+timedelta(hours=1))['usage_estimate']['used_bytes'],str(10*GB))
+        from .models import BillingCycle
+        BillingCycle.objects.create(entitlement=self.record,starts_at=self.cycle.ends_at,
+                                    ends_at=self.cycle.ends_at+timedelta(days=30))
+        self.assertIsNone(project_service(self.record,'entitlement',now=self.cycle.ends_at)['usage_estimate'])
+
     def test_actual_zero_and_over_quota_are_explicit_and_bounded(self):
         for key in ('charged_bytes','upload_bytes','download_bytes'):self.value[key]='0'
         self.assertEqual(self.result()['usage_estimate']['used_bytes'],'0')

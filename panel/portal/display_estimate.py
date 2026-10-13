@@ -35,13 +35,15 @@ def project_estimate(record, cycle, quota, recorded, now):
         if (cycle is None or cycle.entitlement_id != record.pk or not cycle.starts_at <= now < cycle.ends_at
                 or type(value['owner_id']) is not int or value['owner_id'] != record.user_id
                 or value['service_id'] != str(record.public_id)
-                or _time(value['cycle_starts_at']) != cycle.starts_at or _time(value['cycle_ends_at']) != cycle.ends_at
+                or _time(value['cycle_starts_at']) != cycle.starts_at or _time(value['cycle_ends_at']) <= cycle.starts_at
                 or not cycle.starts_at <= _time(value['source_observed_at']) <= _time(value['accepted_at']) <= now
-                or _time(value['accepted_at']) >= cycle.ends_at
+                or _time(value['accepted_at']) >= min(cycle.ends_at, _time(value['cycle_ends_at']))
                 or type(value['source_sha256']) is not str or not re.fullmatch(r'[a-f0-9]{64}', value['source_sha256'])
                 or type(value['approval_ref']) is not str or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.:-]{0,79}', value['approval_ref'])
                 or type(quota) is not int or quota <= 0):
             return None
+        # 管理员可调整同一期的下次重置时间；旧来源结束时刻是审计信息，不据此丢弃基数。
+        # 周期起点与唯一当前周期仍需相同，下一期绝不继承本次迁入值。
         keys = ('charged_bytes', 'upload_bytes', 'download_bytes')
         baseline = value['ledger_baseline']
         if type(baseline) is not dict or set(baseline) != set(keys):
