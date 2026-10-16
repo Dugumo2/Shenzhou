@@ -12,7 +12,7 @@ from django.db.models import F
 from django.utils import timezone
 
 from . import api
-from .client_rules import match_domain, normal_domain, preview_rule, validate_rule
+from .client_rules import match_domain, normal_domain, policy_document, preview_rule, validate_rule
 from .forms import ClientDirectRuleForm
 from .models import ClientDirectRule, OperationJob
 from .services import audit
@@ -45,6 +45,10 @@ def _failure(exc):
 
 
 def _context():
+    if settings.PANEL_LIVE:
+        return {'scope': 'production_candidate', 'publish_state': 'unknown',
+                'client_apply_state': 'unknown',
+                'message': '保存后提交固定发布器；发布成功后，客户端仍需更新路由规则。'}
     return {'scope': 'local_candidate', 'publish_state': 'unknown',
             'client_apply_state': 'unknown', 'message': MESSAGE}
 
@@ -137,7 +141,7 @@ def _payload(request, required, optional=()):
 
 
 def _write_gate():
-    if settings.PANEL_LIVE:
+    if settings.PANEL_LIVE and not settings.RULE_LIVE_WRITES_ENABLED:
         raise RuleError('candidate_only', '生产环境仅开放候选查询；此次保存未执行。', 403)
     # 当前唯一验收的存储模式在 BEGIN 时获得写锁；不将测试外推到其他数据库。
     if not _storage_valid():
@@ -174,9 +178,9 @@ def _conflicts(candidate, rules):
         else:
             continue
         same = candidate.outbound == other.outbound
-        blocking = duplicate or (same and relation != 'regex_scope_overlap')
+        blocking = duplicate
         message = ('已有相同匹配条目，请编辑现有规则。' if duplicate else
-                   '同一走向已有父域或子域覆盖；含禁用候选，需先编辑现有条目。' if blocking else
+                   '同一走向已有父域或子域规则；保留原条目，启用后按相同走向处理。' if same and relation != 'regex_scope_overlap' else
                    '正则作用域可能重叠；仅实际匹配域名时才能确认命中。' if relation == 'regex_scope_overlap' else
                    '相反走向的父子域候选重叠；启用代理候选优先。')
         result.append({'rule_id': other.pk, 'relation': relation,
@@ -224,7 +228,7 @@ def _form(data, instance, rules):
     return form, conflicts
 
 
-def _mutate(request, operation, data, rule_id=None):
+def _save_candidate(request, operation, data, rule_id=None):
     fingerprint = hashlib.sha256(json.dumps({'operation': operation, 'rule_id': rule_id, 'data': data},
                                           sort_keys=True, ensure_ascii=False).encode()).hexdigest()
     try:
@@ -284,6 +288,54 @@ def _mutate(request, operation, data, rule_id=None):
         raise RuleError('database_busy', '候选库忙碌；保留当前输入及幂等键，稍后重试。', 409) from None
 
 
+def _publication(rows):
+    """只认可与当前规则摘要一致的发布回执，不把旧版本显示为已发布。"""
+    if any(not _valid(row) for row in rows):
+        return {'state': 'invalid', 'policy_sha256': None, 'version': None}
+    document, digest = policy_document(rows)
+    result = {'state': 'not_queued', 'policy_sha256': digest, 'version': None}
+    try:
+        source = settings.ROUTING_POLICY_PATH
+        if source.is_file() and not source.is_symlink() and source.stat().st_size <= 2 * 1024 * 1024:
+            if json.loads(source.read_text(encoding='utf-8')) == document:
+                result['state'] = 'queued'
+        status = settings.ROUTING_STATUS_PATH
+        if status.is_file() and not status.is_symlink() and status.stat().st_size <= 65536:
+            value = json.loads(status.read_text(encoding='utf-8'))
+            if isinstance(value, dict) and value.get('policy_sha256') == digest:
+                state = value.get('state')
+                if state in ('succeeded', 'failed', 'running', 'queued'):
+                    result['state'] = state
+                    version = value.get('version')
+                    if isinstance(version, str) and re.fullmatch(r'[A-Za-z0-9._-]{1,128}', version):
+                        result['version'] = version
+    except (OSError, ValueError, TypeError):
+        # 失败细节不能把服务路径或策略正文泄露给客户端。
+        pass
+    return result
+
+
+def _mutate(request, operation, data, rule_id=None):
+    response = _save_candidate(request, operation, data, rule_id)
+    if not settings.PANEL_LIVE:
+        return response
+    # 数据库事务已提交。再获得写锁投影最新整份规则，避免并发旧请求覆盖新规则。
+    # 幂等重试也执行此步骤，可恢复“已保存、投影失败”，但不会重复增删记录。
+    try:
+        from .views import write_routing_policy
+        with transaction.atomic():
+            rows = list(ClientDirectRule.objects.order_by('pk'))
+            write_routing_policy(rows)
+            publication = _publication(rows)
+    except (OSError, OperationalError, ValidationError):
+        return api.error('publish_queue_failed', '规则已保存，但提交发布失败；请重试原请求，无需重复添加。', 503)
+    body = json.loads(response.content)
+    body['data'].update(_context())
+    body['data'].update(publication=publication, publish_state=publication['state'])
+    response.content = json.dumps(body, ensure_ascii=False)
+    return response
+
+
 @api.endpoint(methods=('GET', 'POST'), staff=True)
 def rules(request):
     if request.method == 'GET':
@@ -292,9 +344,15 @@ def rules(request):
             response = api.admin_rules(request)
             body = json.loads(response.content)
             rows = list(ClientDirectRule.objects.order_by('pk'))
-            body['data'].update({'read_only': bool(settings.PANEL_LIVE) or not _storage_valid(),
+            body['data'].update({'read_only': (bool(settings.PANEL_LIVE) and not settings.RULE_LIVE_WRITES_ENABLED) or not _storage_valid(),
                 'items': [_item(row) for row in rows], 'candidate_revision': _revision(rows),
                 'actions': list(ACTIONS), 'limitations': LIMITATIONS, 'message': MESSAGE})
+            if settings.PANEL_LIVE:
+                publication = _publication(rows)
+                body['data'].update(_context())
+                body['data'].update(publication=publication, publish_state=publication['state'],
+                    limitations=['仅自建规则接入现有固定发布器；来源和规则方案发布能力独立。',
+                                 '客户端更新规则后才会应用；页面无法确认设备当前配置。'])
             if any(not _valid(row) for row in rows):
                 custom = next(source for source in body['data']['sources'] if source['id'] == 'custom')
                 custom.update(state='invalid', sha256=None)

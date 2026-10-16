@@ -145,20 +145,6 @@ class ClientDirectRuleForm(forms.ModelForm):
                 duplicate = duplicate.exclude(pk=self.instance.pk)
             if duplicate.exists():
                 self.add_error('value', '相同匹配方式和域名已存在；请编辑现有规则，避免重复或冲突。')
-            # 同一走向下，父后缀已经覆盖子域名时拒绝重复候选；相反走向允许，
-            # 由构建器按“代理优先”处理，并可在预览页看到实际命中。
-            if not self.errors and cleaned['kind'] in ('exact', 'suffix'):
-                for other in ClientDirectRule.objects.exclude(pk=self.instance.pk if self.instance.pk else None):
-                    if other.outbound != cleaned['outbound'] or other.kind not in ('exact', 'suffix'):
-                        continue
-                    candidate = cleaned['value']
-                    existing = other.value
-                    # 只有后缀才能覆盖其子域；精确父域与子域后缀不相交。
-                    existing_covers = other.kind == 'suffix' and (
-                        candidate == existing or candidate.endswith('.' + existing))
-                    candidate_covers = cleaned['kind'] == 'suffix' and (
-                        existing == candidate or existing.endswith('.' + candidate))
-                    if existing_covers or candidate_covers:
-                        self.add_error('value', '同一走向已有父域或子域规则覆盖它；请编辑现有规则，避免重复。')
-                        break
+            # 同走向父子覆盖只是冗余，不阻止用户把单域扩大为已授权后缀。
+            # 精确重复仍拒绝；保护域校验与构建器的代理优先顺序保持不变。
         return cleaned

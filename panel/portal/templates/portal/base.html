@@ -6,10 +6,10 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="light">
   <title>{% block title %}总览{% endblock %} · {{ site_brand|default:'行舟' }}</title>
-  <link rel="stylesheet" href="{% static 'portal/portal.css' %}">
-  <link rel="stylesheet" href="{% static 'portal/v2.css' %}">
-  <script src="{% static 'portal/portal.js' %}" defer></script>
-  <script src="{% static 'portal/v2.js' %}" defer></script>
+  <link rel="stylesheet" href="{% static 'portal/portal.css' %}?v={{ legacy_asset_version }}">
+  <link rel="stylesheet" href="{% static 'portal/v2.css' %}?v={{ legacy_asset_version }}">
+  <script src="{% static 'portal/portal.js' %}?v={{ legacy_asset_version }}" defer></script>
+  <script src="{% static 'portal/v2.js' %}?v={{ legacy_asset_version }}" defer></script>
 </head>
 <body>
   <a class="skip-link" href="#main">跳到主要内容</a>

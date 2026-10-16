@@ -109,12 +109,11 @@ class ClientDirectRulesTests(TestCase):
         self.assertEqual(deleted.status_code, 302)
         self.assertFalse(ClientDirectRule.objects.exists())
 
-    def test_same_direction_parent_child_overlap_is_rejected(self):
+    def test_same_direction_parent_child_overlap_preserves_both_rules(self):
         self.assertEqual(self.post_rule(value='example.com').status_code, 302)
         child = self.post_rule(value='api.example.com')
-        self.assertEqual(child.status_code, 200)
-        self.assertContains(child, '已有父域或子域规则覆盖')
-        self.assertEqual(ClientDirectRule.objects.count(), 1)
+        self.assertEqual(child.status_code, 302)
+        self.assertEqual(ClientDirectRule.objects.count(), 2)
 
     def test_save_writes_versioned_policy_queue(self):
         path = Path(__file__).resolve().parents[1] / 'var' / 'test-routing-policy.json'

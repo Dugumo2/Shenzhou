@@ -106,3 +106,19 @@ test('三页把生产会话及真实只读信号接到统一导航，载入只�
     ui.unmount()
   }
 })
+
+test('正式写入按接口开放，展示发布状态且仍保留规则分区', async () => {
+  const ui = mountPage('RulesPage.vue', false)
+  await flush()
+  ui.state.openEditor()
+  assert.equal(ui.state.editOpen.value, true)
+  for (const [state, label] of [['queued','规则已保存，等待生成订阅'], ['succeeded','已生成订阅，请在客户端更新路由规则'], ['failed','生成失败，客户端仍使用上一版']]) {
+    ui.state.data.value = {...ui.state.data.value, publication:{state,version:null}}
+    await flush()
+    assert.equal(ui.state.publicationMessage.value, label)
+    const rendered = nodes(ui.render())
+    assert.ok(rendered.some(node => (node.type === 'el-alert' || node.type?.name === 'el-alert') && node.props?.title === label))
+    assert.equal(rendered.find(node=>node.type==='../components/RuleSectionNav.vue')?.props['read-only'], false)
+  }
+  ui.unmount()
+})

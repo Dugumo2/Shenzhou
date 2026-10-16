@@ -147,22 +147,27 @@ class CandidateRuleAPITests(TestCase):
         self.assertEqual(self.client.get(ROOT).json()['data']['items'][0]['value'], 'school.example.com')
         duplicate = self.assert_error(self.send('post', payload()), 409, 'duplicate_rule')
         self.assertEqual(duplicate['conflicts'][0]['rule_id'], row.pk)
-        self.assert_error(self.send('post', payload(kind='exact', value='api.school.example.com')), 422, 'invalid_rule')
+        self.assertEqual(self.send('post', payload(kind='exact', value='api.school.example.com')).status_code, 201)
         preview = self.send('post', {'domain': 'api.school.example.com'}, ROOT + '/preview').json()['data']
         self.assertEqual(preview['matched_id'], row.pk)
         self.assertTrue(preview['related'][0]['matched'])
         row.refresh_from_db()
         self.assertEqual(row.value, 'SCHOOL.EXAMPLE.COM.')
 
-    def test_same_action_parent_child_overlap_rejected_in_both_directions(self):
+    def test_same_action_parent_child_overlap_warns_in_both_directions(self):
         self.saved(payload(value='example.com'))
-        error = self.assert_error(self.send('post', payload(kind='exact', value='api.example.com')),
-                                  422, 'invalid_rule')
+        response = self.send('post', payload(kind='exact', value='api.example.com'))
+        self.assertEqual(response.status_code, 201)
+        error = response.json()['data']
         self.assertEqual(error['conflicts'][0]['relation'], 'child_covered_by_parent')
+        self.assertEqual(error['conflicts'][0]['severity'], 'warning')
         ClientDirectRule.objects.all().delete()
         self.saved(payload(kind='exact', value='api.example.com'))
-        error = self.assert_error(self.send('post', payload(value='example.com')), 422, 'invalid_rule')
+        response = self.send('post', payload(value='example.com'))
+        self.assertEqual(response.status_code, 201)
+        error = response.json()['data']
         self.assertEqual(error['conflicts'][0]['relation'], 'parent_covers_child')
+        self.assertEqual(error['conflicts'][0]['severity'], 'warning')
 
     def test_exact_parent_and_suffix_child_do_not_overlap_in_either_creation_order(self):
         parent = self.saved(payload(kind='exact', value='example.com'))
@@ -178,7 +183,7 @@ class CandidateRuleAPITests(TestCase):
 
     def test_disabled_rule_remains_duplicate_guard_but_does_not_match(self):
         self.saved(payload(enabled=False))
-        self.assert_error(self.send('post', payload(kind='exact', value='api.school.example.com')), 422, 'invalid_rule')
+        self.assertEqual(self.send('post', payload(kind='exact', value='api.school.example.com', enabled=False)).status_code, 201)
         value = self.send('post', {'domain': 'api.school.example.com'}, ROOT + '/preview').json()['data']
         self.assertEqual(value['result'], 'no_custom_match')
         self.assertFalse(value['related'][0]['enabled'])
@@ -451,15 +456,16 @@ class CandidateRuleConcurrencyTests(TransactionTestCase):
                 self.assertEqual(response.status_code, 409)
                 self.assertEqual(response.json()['error']['code'], 'duplicate_rule')
 
-    def test_concurrent_parent_child_creates_cannot_bypass_coverage_check(self):
+    def test_concurrent_parent_child_creates_preserve_both_same_action_rules(self):
         bodies = [payload(value='example.com'), payload(value='api.example.com')]
         results = self.concurrent([('post', ROOT, body) for body in bodies])
-        self.assertEqual(sum(status == 201 for status, _ in results), 1, results)
-        self.assertEqual(ClientDirectRule.objects.count(), 1)
+        self.assertGreaterEqual(sum(status == 201 for status, _ in results), 1, results)
         for index, (status, data) in enumerate(results):
             if status == 409 and data['error']['code'] == 'database_busy':
                 response = self.clients[index].post(ROOT, json.dumps(bodies[index]), content_type='application/json')
-                self.assertEqual(response.status_code, 422)
+                self.assertEqual(response.status_code, 201)
+                self.assertEqual(response.json()['data']['conflicts'][0]['severity'], 'warning')
+        self.assertEqual(ClientDirectRule.objects.count(), 2)
 
     def test_concurrent_same_revision_edit_preserves_one_winner(self):
         rule = ClientDirectRule.objects.create(creator=self.admin, kind='exact', value='initial.example.com')

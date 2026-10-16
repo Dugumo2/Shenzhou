@@ -40,6 +40,9 @@ def main():
         raw=path.read_bytes()
         if any(re.search(pattern,raw) for pattern in SECRET_MARKERS):raise ValueError('源码秘密扫描拒绝')
         items[path.relative_to(ROOT/'panel').as_posix()]=raw
+    # 旧管理入口仍由 Nginx 的固定 alias 提供这四个文件；每次切换发行目录必须一起携带。
+    for name in ('portal.css', 'v2.css', 'portal.js', 'v2.js'):
+        items['collected-static/portal/'+name] = items['portal/static/portal/'+name]
     frontend_manifest=build_manifest(args.dist)
     for name in json.loads(frontend_manifest)['files']:
         items['frontend-release/'+name]=(args.dist/name).read_bytes()
