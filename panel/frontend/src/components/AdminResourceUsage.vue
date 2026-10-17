@@ -8,6 +8,7 @@ import type { ProviderUsage } from '../providerUsage'
 import ProviderUsageDashboard from './ProviderUsageDashboard.vue'
 import RefreshControl from './RefreshControl.vue'
 type ResourceItem = { service_id: string; provider_usage: ProviderUsage }
+withDefaults(defineProps<{ controlled?: boolean }>(), { controlled: false })
 const identity = useSessionIdentity(() => auth.session)
 const snapshot = useSnapshotRequest<{ items: ResourceItem[] }>({ reconcile: (next, previous) => ({ ...next, items: next.items.map(item => retainResourceUsage(item, previous?.items.find(old => old.service_id === item.service_id) || null)) }) })
 const { busy, error, initialLoading, lastReadAt } = snapshot
@@ -18,10 +19,12 @@ function load() {
   return snapshot.load('/admin/resource-usage', identity.value)
 }
 watch(identity, () => { snapshot.reset(); void load() }, { immediate:true, flush:'sync' })
+// 总览统一触发读取；独立使用时仍保留本组件的刷新入口与权限清理。
+defineExpose({ load, reset: snapshot.reset, busy, error, sourceError, lastReadAt, accessDenied: snapshot.accessDenied })
 </script>
 <template>
   <section class="surface resource-section" aria-label="资源采购用量">
-    <div class="section-title"><div><h2>资源采购用量</h2><p class="small muted">外部节点与服务器各自的容量预算和采样记录。</p></div><RefreshControl :loading="busy" :error="error" :source-error="sourceError" :last-read-at="lastReadAt" @refresh="load" /></div>
+    <div class="section-title"><div><h2>资源采购用量</h2><p class="small muted">服务器与外部节点各自的采购额度和用量。</p></div><RefreshControl v-if="!controlled" :loading="busy" :error="error" :source-error="sourceError" :last-read-at="lastReadAt" @refresh="load" /></div>
     <el-alert v-if="error" :title="error" type="error" :closable="false" show-icon />
     <el-skeleton v-if="initialLoading" :rows="4" animated />
     <ProviderUsageDashboard v-for="item in items" :key="item.service_id" :data="item.provider_usage" />

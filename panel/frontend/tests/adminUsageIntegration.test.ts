@@ -103,7 +103,7 @@ test('独立管理员资源区域保留两份采购圆环、原始上下行与�
   assert.equal((html.match(/data-chart="quota-gauge"/g)||[]).length,2)
   assert.equal((html.match(/data-chart="transfer-composition"/g)||[]).length,1)
   for(const text of ['资源采购用量','HOME','BWG','73 GB','120 GB','327 GB','1,880 GB','2027-01-19'])assert.ok(html.includes(text),text)
-  assert.match(readFileSync(resolve(root,'pages/AdminOverviewPage.vue'),'utf8'),/<AdminResourceUsage \/>/)
+  assert.match(readFileSync(resolve(root,'pages/AdminOverviewPage.vue'),'utf8'),/<AdminResourceUsage ref="resourceUsage" controlled \/>/)
 })
 
 test('管理员用户服务实际入口保留统一套餐字段，采购数据不占套餐位置',async()=>{

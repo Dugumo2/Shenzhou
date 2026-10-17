@@ -39,7 +39,7 @@ async function renderComponent(name:string,props:Record<string,unknown>){
 
 test('真实卡片组件含指标、来源和核心节点按钮，未知不补零',async()=>{
   const html=await renderComponent('ServerInventoryCard',{server:server(),now})
-  for(const text of ['隔离测试服务器','18.5%','123 KB/s','456 KB/s','测试固定采样','最后联系','核心 2','节点 1','查看详情'])assert.ok(html.includes(text),text)
+  for(const text of ['隔离测试服务器','18.5%','123 KB/s','456 KB/s','测试固定采样','最近观测','核心 2','节点 1','查看详情'])assert.ok(html.includes(text),text)
   assert.match(html,/<button[^>]*>核心 2/)
   const missing=await renderComponent('ServerInventoryCard',{server:{...server(),observation:null,core_count:undefined,node_count:undefined,monitoring:{state:'not_connected',online:null}},now,compact:true})
   assert.ok((missing.match(/未知/g)||[]).length>=7);assert.doesNotMatch(missing,/0%|0 B\/s/);assert.match(missing,/compact/)

@@ -1,24 +1,41 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
-import { useRoute } from 'vue-router'
-import { applySession, hydrateSession } from '../auth'
-import { errorMessage, request } from '../api'
+import { computed, onMounted, ref } from 'vue'
+import { isNavigationFailure, NavigationFailureType, useRoute } from 'vue-router'
+import { auth, authenticate, hydrateSession, isSessionFor } from '../auth'
+import { errorMessage } from '../api'
 import { router } from '../router'
-import type { Session } from '../types'
 const route = useRoute()
 const username = ref(''), password = ref(''), busy = ref(false), error = ref('')
-onMounted(async () => { try { await hydrateSession(true) } catch (e) { error.value = errorMessage(e) } })
+const canContinue = computed(() => isSessionFor(username.value))
+onMounted(async () => { try { await hydrateSession(true) } catch (e) {
+  if (!busy.value && !auth.session?.authenticated) error.value = errorMessage(e)
+} })
+function redirectTarget() {
+  const target = route.query.redirect
+  if (typeof target !== 'string') return '/services'
+  try {
+    const decoded = decodeURIComponent(target)
+    if (!decoded.startsWith('/') || decoded.startsWith('//') || /[\\\u0000-\u001f\u007f]/.test(decoded)
+      || decoded.split(/[?#]/)[0] === '/login') return '/services'
+  } catch { return '/services' }
+  return target
+}
 async function login() {
-  if (!username.value.trim() || !password.value) { error.value = '请输入账号和密码。'; return }
+  if (busy.value) return
+  if (!username.value.trim() || (!canContinue.value && !password.value)) { error.value = '请输入账号和密码。'; return }
   busy.value = true; error.value = ''
   try {
-    await hydrateSession()
-    applySession(await request<Session>('/login', 'POST', { username: username.value.trim(), password: password.value }))
+    await authenticate(username.value, password.value)
     password.value = ''
-    const target = typeof route.query.redirect === 'string' && route.query.redirect.startsWith('/') && !route.query.redirect.startsWith('//') && route.query.redirect !== '/login' ? route.query.redirect : '/services'
-    await router.replace(target)
   } catch (e) { error.value = errorMessage(e); password.value = '' }
-  finally { busy.value = false }
+  if (!error.value) {
+    try {
+      const failure = await router.replace(redirectTarget())
+      if (failure && !isNavigationFailure(failure, NavigationFailureType.duplicated)) throw failure
+    }
+    catch { error.value = '已登录，但页面暂时未能打开。请点击“进入服务”重试。' }
+  }
+  busy.value = false
 }
 </script>
 <template><main class="login-layout">
@@ -26,7 +43,7 @@ async function login() {
   <section class="login-form-panel"><div class="login-form"><p class="eyebrow">欢迎回来</p><h2>登录神舟云</h2><p class="muted">使用你的账号，查看已分配的服务。</p>
     <el-alert v-if="route.query.expired" title="登录已过期，请重新登录。" type="warning" show-icon :closable="false" class="spaced" />
     <el-alert v-if="error" :title="error" type="error" show-icon :closable="false" class="spaced" />
-    <form @submit.prevent="login"><label for="username">账号</label><el-input id="username" v-model="username" autocomplete="username" placeholder="请输入账号" :disabled="busy" /><label for="password">密码</label><el-input id="password" v-model="password" type="password" show-password autocomplete="current-password" placeholder="请输入密码" :disabled="busy" /><el-button class="login-submit" type="primary" native-type="submit" :loading="busy">登录</el-button></form>
+    <form @submit.prevent="login"><label for="username">账号</label><el-input id="username" v-model="username" autocomplete="username" placeholder="请输入账号" :disabled="busy" /><label for="password">密码</label><el-input id="password" v-model="password" type="password" show-password autocomplete="current-password" placeholder="请输入密码" :disabled="busy" /><el-button class="login-submit" type="primary" native-type="submit" :loading="busy">{{ canContinue ? '进入服务' : '登录' }}</el-button></form>
     <p class="register-note">还没有账号？<a href="/register/">使用邀请码注册</a></p>
   </div></section>
 </main></template>
