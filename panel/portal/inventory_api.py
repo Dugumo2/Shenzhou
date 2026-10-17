@@ -3,20 +3,22 @@ import uuid
 import json
 
 from django.core.paginator import EmptyPage, Paginator
-from django.db.models import Count, Exists, IntegerField, OuterRef, Prefetch, Q, Subquery
-from django.db.models.functions import Coalesce
+from django.core.exceptions import RequestDataTooBig
+from django.db.models import Q
 
 from .api import endpoint, error, page_options, success
 from .api_helpers import iso
 from .models import CheckResult, CoreInstance, Egress, Ingress, Line, Server, ServerObservation
 from .inventory_service import InventoryError, edit_metadata, metadata_edit_enabled
-from .observation_ingest import check_projection, freshness, observation_projection
+from .observation_ingest import ObservationError, check_projection, freshness, observation_projection, target_fingerprint
+from .inventory_purchase import InventoryPurchases
+from .inventory_queries import (ENDPOINT_LIMIT, _servers_query, _cores_query, _ingresses_query,
+    _egresses_query, _hydrate_egress_chains, _lines_query, _prepare_line_graphs, load_check_results)
+from .node_resources import project_ingress, project_egress
+from .line_projection import egress_chain_resources, line_path_projection
+from .resource_checks import actions_for_targets, enqueue_check, get_job
 
 
-ENDPOINT_LIMIT = 100
-SERVER_FIELDS = ('id', 'public_id', 'name', 'notes', 'revision', 'enabled', 'adapter', 'last_seen_at')
-INGRESS_FIELDS = ('id', 'name', 'protocol', 'enabled', 'server_id')
-EGRESS_FIELDS = ('id', 'name', 'kind', 'fail_closed', 'server_id')
 LIMITATIONS = [
     '仅查询当前数据库中的登记资源；登记启用不等于在线或已经应用。',
     '仅展示受信采集来源的独立回执；刷新列表不会采集或检测，过期回执不代表当前健康。',
@@ -47,29 +49,19 @@ def _filters(request, *, with_server=False):
     return {'options': options, 'q': q, 'status': status, 'server_id': server_id}, None
 
 
-def _listing(query, options, project):
+def _listing(query, options, project, prepare=None):
     paginator = Paginator(query.order_by('name', 'pk'), options[1])
     try:
         page = paginator.page(options[0])
     except EmptyPage:
         return error('page_not_found', '此页不存在，请返回前一页。', 404)
-    return success({'items': [project(row) for row in page], 'read_only': not metadata_edit_enabled(),
+    rows = list(page)
+    if prepare is not None:
+        prepare(rows)
+    return success({'items': [project(row) for row in rows], 'read_only': not metadata_edit_enabled(),
                     'pagination': {'page': page.number, 'page_size': options[1], 'total': paginator.count,
                                    'pages': paginator.num_pages, 'has_next': page.has_next(),
                                    'has_previous': page.has_previous()}, 'limitations': LIMITATIONS})
-
-
-def _count_for_server(model):
-    # 分别聚合两类端点，避免入口与出口交叉连接产生膨胀。
-    return Coalesce(Subquery(model.objects.filter(server_id=OuterRef('pk')).order_by()
-                             .values('server_id').annotate(total=Count('pk')).values('total'),
-                             output_field=IntegerField()), 0)
-
-
-def _servers_query():
-    return Server.objects.only(*SERVER_FIELDS).annotate(
-        ingress_count=_count_for_server(Ingress), egress_count=_count_for_server(Egress)).prefetch_related(
-            Prefetch('observations', queryset=ServerObservation.objects.order_by('-observed_at', '-pk')[:1], to_attr='latest_observations'))
 
 
 def _server_ref(server):
@@ -78,7 +70,8 @@ def _server_ref(server):
 
 def _server_projection(server):
     row = next(iter(server.latest_observations), None)
-    observation = observation_projection(row, server)
+    previous = server.latest_observations[1] if len(server.latest_observations) > 1 else None
+    observation = observation_projection(row, server, previous=previous)
     monitoring = {'state': 'not_connected', 'online': None, 'observed_at': None}
     if observation:
         monitoring = {'state': observation['freshness'], 'online': observation['metrics'].get('online')
@@ -87,17 +80,9 @@ def _server_projection(server):
     return {**_server_ref(server), 'adapter': server.adapter, 'last_seen_at': iso(server.last_seen_at),
             'notes': server.notes, 'revision': server.revision,
             'ingress_count': server.ingress_count, 'egress_count': server.egress_count,
+            'core_count': server.core_count, 'node_count': server.ingress_count,
+            'observation': observation, 'purchase_meter_id': server.purchase_meter_id,
             'monitoring': monitoring}
-
-
-def _ingresses_query():
-    return Ingress.objects.select_related('server').only(
-        *INGRESS_FIELDS, *('server__' + field for field in SERVER_FIELDS)).order_by('pk')
-
-
-def _egresses_query():
-    return Egress.objects.select_related('server').only(
-        *EGRESS_FIELDS, *('server__' + field for field in SERVER_FIELDS)).order_by('pk')
 
 
 def _ingress_projection(ingress):
@@ -154,7 +139,7 @@ def _patch(request, kind, identifier):
 
 
 def _checks(query):
-    rows = list(query.order_by('-observed_at', '-pk')[:101])
+    rows = load_check_results(query.order_by('-observed_at', '-pk')[:101])
     return {'items': [check_projection(row) for row in rows[:100]], 'truncated': len(rows) > 100}
 
 
@@ -168,15 +153,30 @@ def server_detail(request, public_id):
     server = _servers_query().filter(public_id=identifier).first() if identifier is not None else None
     if server is None:
         return error('not_found', '服务器不存在或不可访问。', 404)
-    observation = observation_projection(next(iter(server.latest_observations), None), server)
-    cores = list(CoreInstance.objects.filter(server=server).prefetch_related('ingresses').order_by('pk')[:101])
+    observation = observation_projection(next(iter(server.latest_observations), None), server,
+        previous=server.latest_observations[1] if len(server.latest_observations) > 1 else None)
+    purchases = InventoryPurchases(request.user)
+    ingress_rows = list(_ingresses_query().filter(server=server)[:ENDPOINT_LIMIT])
+    egress_rows = list(_egresses_query().filter(server=server)[:ENDPOINT_LIMIT])
+    _hydrate_egress_chains(egress_rows)
+    nodes = [project_ingress(row) for row in ingress_rows]
+    nodes.extend(project_egress(row, purchases.for_resource(row.purchase_meter_id, 'external_node')['purchase_meter']) for row in egress_rows)
+    cores = list(_cores_query().filter(server=server).order_by('pk')[:101])
     core_items = [{'id': str(core.public_id), 'name': core.name, 'instance_key': core.instance_key,
                    'core_type': core.core_type, 'registered_version': core.registered_version,
                    'configuration_owner': core.configuration_owner, 'configuration_version': core.configuration_version,
                    'revision': core.revision, 'notes': core.notes,
+                   'service_unit': core.service_unit, 'owner_state': core.owner_state,
+                   'evidence_source': core.evidence_source, 'evidence_observed_at': iso(core.evidence_observed_at),
                    'ingress_ids': [str(entry.pk) for entry in core.ingresses.all() if entry.server_id == server.pk],
                    'association_valid': all(entry.server_id == server.pk for entry in core.ingresses.all())} for core in cores[:100]]
+    actions = actions_for_targets([('server', server)] + [('core', core) for core in cores[:100]]
+                                  + [('ingress', row) for row in ingress_rows] + [('egress', row) for row in egress_rows])
     return success({'server': _server_projection(server), 'read_only': not metadata_edit_enabled(),
+                    **purchases.for_resource(server.purchase_meter_id, 'server'),
+                    'nodes': {'items': nodes, 'total': server.ingress_count + server.egress_count,
+                              'truncated': server.ingress_count + server.egress_count > len(nodes)},
+                    'check_actions': actions,
                     'metrics': {'cpu_percent': None, 'memory_percent': None, 'disk_percent': None,
                                 'upload_bps': None, 'download_bps': None, 'total_transfer_bytes': None},
                     'observation': observation,
@@ -184,30 +184,10 @@ def server_detail(request, public_id):
                     'checks': _checks(CheckResult.objects.filter(Q(server=server) | Q(core__server=server)
                                         | Q(ingress__server=server) | Q(egress__server=server))),
                     'core': {'actual_version': None, 'state': 'not_connected'},
-                    'ingresses': _endpoint_page(_ingresses_query().filter(server=server),
-                                               _ingress_projection, server.ingress_count),
-                    'egresses': _endpoint_page(_egresses_query().filter(server=server),
-                                             _egress_projection, server.egress_count),
-                    'capabilities': {'edit': metadata_edit_enabled(), 'probe': False, 'manage_cores': False},
+                    'ingresses': _endpoint_page(ingress_rows, _ingress_projection, server.ingress_count),
+                    'egresses': _endpoint_page(egress_rows, _egress_projection, server.egress_count),
+                    'capabilities': {'edit': metadata_edit_enabled(), 'probe': bool(actions), 'manage_cores': False},
                     'limitations': LIMITATIONS})
-
-
-def _lines_query():
-    through = Line.additional_ingresses.through
-    additions = through.objects.filter(line_id=OuterRef('pk'))
-    additional_count = additions.exclude(ingress_id=OuterRef('ingress_id')).order_by().values('line_id') \
-        .annotate(total=Count('pk')).values('total')
-    fields = ['id', 'public_id', 'name', 'notes', 'revision', 'enabled', 'ingress_id', 'egress_id']
-    fields += ['ingress__' + field for field in INGRESS_FIELDS]
-    fields += ['egress__' + field for field in EGRESS_FIELDS]
-    fields += [prefix + field for prefix in ('ingress__server__', 'egress__server__') for field in SERVER_FIELDS]
-    return Line.objects.select_related('ingress__server', 'egress__server').only(*fields).annotate(
-        additional_count=Coalesce(Subquery(additional_count, output_field=IntegerField()), 0),
-        has_disabled_additional=Exists(additions.filter(Q(ingress__enabled=False) | Q(ingress__server__enabled=False))),
-    ).prefetch_related(Prefetch('additional_ingresses', queryset=_ingresses_query()[:ENDPOINT_LIMIT],
-                               to_attr='registered_additional_ingresses'),
-                       Prefetch('checks', queryset=CheckResult.objects.filter(check_kind='whole_path').order_by('-observed_at', '-pk')[:1],
-                                to_attr='latest_checks'))
 
 
 def _line_projection(line):
@@ -224,7 +204,10 @@ def _line_projection(line):
     if latest:
         verification = {'state': freshness(latest, 'line', line), 'result': latest.result,
                         'observed_at': iso(latest.observed_at), 'expires_at': iso(latest.expires_at), 'source': latest.source}
+    path = line_path_projection(line, ingress_nodes=[project_ingress(row) for row in ingresses],
+                               egress_node=project_egress(line.egress), total_ingresses=total)
     return {'id': str(line.public_id), 'name': line.name, 'notes': line.notes, 'revision': line.revision, 'enabled': line.enabled,
+            'path': path,
             'ingresses': [_ingress_projection(row) for row in ingresses], 'ingress_count': total,
             'ingresses_truncated': total > len(ingresses), 'egress': _egress_projection(line.egress),
             'endpoint_registration': 'enabled' if endpoints_enabled else 'disabled',
@@ -251,7 +234,7 @@ def lines(request):
         server_id = filters['server_id']
         query = query.filter(Q(ingress__server__public_id=server_id) | Q(egress__server__public_id=server_id)
                              | Q(additional_ingresses__server__public_id=server_id)).distinct()
-    return _listing(query, filters['options'], _line_projection)
+    return _listing(query, filters['options'], _line_projection, prepare=_prepare_line_graphs)
 
 
 @endpoint(methods=('GET', 'PATCH'), staff=True)
@@ -265,7 +248,62 @@ def line_detail(request, public_id):
     if line is None:
         return error('not_found', '线路不存在或不可访问。', 404)
     ingress_ids = list(line.additional_ingresses.values_list('pk', flat=True)) + [line.ingress_id]
-    return success({'line': _line_projection(line), 'read_only': not metadata_edit_enabled(),
-                    'checks': _checks(CheckResult.objects.filter(Q(line=line) | Q(ingress_id__in=ingress_ids) | Q(egress_id=line.egress_id))),
-                    'capabilities': {'edit': metadata_edit_enabled(), 'probe': False, 'publish': False},
+    # 详情目标版本必须覆盖全部入口；显式安全字段预取，不读取部署租约或凭据。
+    complete_ingresses = list(_ingresses_query().filter(additional_lines=line))
+    purchases = InventoryPurchases(request.user)
+    _prepare_line_graphs([line], complete=True)
+    unique = {line.ingress.pk: line.ingress}
+    unique.update({row.pk: row for row in line.registered_additional_ingresses})
+    ingress_rows = list(unique.values())[:ENDPOINT_LIMIT]
+    nodes = [project_ingress(row) for row in ingress_rows]
+    chain, chain_issues = egress_chain_resources(line.egress)
+    nodes.extend(project_egress(row, purchases.for_resource(row.purchase_meter_id, 'external_node')['purchase_meter']) for row in chain)
+    projected = _line_projection(line)
+    line.registered_additional_ingresses = complete_ingresses
+    line.registered_additional_ingresses_complete = True
+    actions = actions_for_targets([('line', line)] + [('ingress', row) for row in ingress_rows] + [('egress', row) for row in chain])
+    try:
+        projected['target_version'] = target_fingerprint('line', line)
+    except ObservationError:
+        projected['target_version'] = None
+        actions = []
+    return success({'line': projected, 'read_only': not metadata_edit_enabled(),
+                    'nodes': {'items': nodes, 'total': 1 + line.additional_count + len(chain),
+                              'truncated': bool(chain_issues) or 1 + line.additional_count > len(ingress_rows)},
+                    'check_actions': actions,
+                    'checks': _checks(CheckResult.objects.filter(Q(line=line) | Q(ingress_id__in=ingress_ids) | Q(egress_id__in=[row.pk for row in chain]))),
+                    'capabilities': {'edit': metadata_edit_enabled(), 'probe': bool(actions), 'publish': False},
                     'limitations': LIMITATIONS + ['失败关闭仅为出口登记设置，尚无整条线路的实际验证证据。']})
+
+
+@endpoint(methods=('POST',), staff=True)
+def resource_check_create(request):
+    if request.content_type != 'application/json':
+        return error('unsupported_media_type', '请使用 JSON 请求。', 415)
+    try:
+        def unique(pairs):
+            data = {}
+            for key, value in pairs:
+                if key in data:
+                    raise ValueError()
+                data[key] = value
+            return data
+        if len(request.body) > 4096:
+            raise ValueError()
+        body = json.loads(request.body, object_pairs_hook=unique,
+                          parse_constant=lambda _: (_ for _ in ()).throw(ValueError()))
+    except (ValueError, UnicodeError, RecursionError, RequestDataTooBig):
+        return error('invalid_json', '检查请求内容无效或过大。', 422)
+    try:
+        value = enqueue_check(request.user, body)
+        return success(value, status=200 if value.get('replayed') else 202)
+    except InventoryError as exc:
+        return error(exc.code, exc.message, exc.status)
+
+
+@endpoint(staff=True)
+def resource_check_detail(request, public_id):
+    try:
+        return success(get_job(request.user, public_id))
+    except InventoryError as exc:
+        return error(exc.code, exc.message, exc.status)

@@ -24,6 +24,10 @@
 !/panel/megabox/
 !/panel/bridge/
 !/panel/tests/
+!/panel/deploy/
+/panel/deploy/*
+!/panel/deploy/megabox-host-observer.service.example
+!/panel/deploy/megabox-resource-checks.service.example
 /docs/*
 !/docs/public/
 !/docs/panel/

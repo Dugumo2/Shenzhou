@@ -1,0 +1,31 @@
+# 候选服务，只有正式清单批准后才安装；不得以root运行。
+[Unit]
+Description=Fixed resource checks for Megabox panel
+After=network.target
+
+[Service]
+Type=simple
+User=megabox-panel
+Group=megabox-panel
+WorkingDirectory=/opt/megabox-panel/current
+EnvironmentFile=/etc/megabox-panel/panel.env
+Environment=PANEL_RESOURCE_CHECKS_POLICY=/etc/megabox-panel/resource-checks.json
+ExecStart=/opt/megabox-panel/venv/bin/python manage.py run_resource_checks --loop
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=10
+KillMode=control-group
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/megabox-panel
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+CapabilityBoundingSet=
+MemoryMax=96M
+CPUQuota=10%
+TasksMax=16
+
+[Install]
+WantedBy=multi-user.target

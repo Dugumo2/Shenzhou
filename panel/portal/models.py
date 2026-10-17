@@ -105,6 +105,7 @@ class Server(models.Model):
     revision = models.PositiveIntegerField(default=1)
     enabled = models.BooleanField(default=True)
     adapter = models.CharField(max_length=40, default='unconfigured')
+    purchase_meter_id = models.CharField(max_length=64, null=True, blank=True)
     last_seen_at = models.DateTimeField(null=True, blank=True)
     deployment_lease_id = models.UUIDField(null=True, blank=True)
     deployment_lease_until = models.DateTimeField(null=True, blank=True)
@@ -122,14 +123,52 @@ class Ingress(models.Model):
     enabled = models.BooleanField(default=True)
     # 此处只保存受限配置的引用；不保存私钥、节点密码或订阅 URI。
     config_ref = models.CharField(max_length=120, blank=True)
+    revision = models.PositiveIntegerField(default=1)
+    endpoint_host = models.CharField(max_length=253, null=True, blank=True)
+    endpoint_port = models.PositiveIntegerField(null=True, blank=True)
+    evidence_source = models.CharField(max_length=120, blank=True, default='')
+    evidence_observed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        constraints = [models.CheckConstraint(condition=models.Q(endpoint_port__isnull=True)
+            | models.Q(endpoint_port__gte=1, endpoint_port__lte=65535), name='ingress_valid_endpoint_port')]
 
 
 class Egress(models.Model):
     server = models.ForeignKey(Server, on_delete=models.PROTECT, related_name='egresses')
+    core_instance = models.ForeignKey('CoreInstance', null=True, blank=True,
+        on_delete=models.PROTECT, related_name='executed_egresses')
+    next_egress = models.ForeignKey('self', null=True, blank=True,
+        on_delete=models.PROTECT, related_name='previous_egresses')
     name = models.CharField(max_length=100)
     kind = models.CharField(max_length=24, choices=[('direct', '服务器出站'), ('upstream', '上游链路')])
     config_ref = models.CharField(max_length=120, blank=True)
     fail_closed = models.BooleanField(default=True)
+    revision = models.PositiveIntegerField(default=1)
+    # server 是执行位置，不代表拥有外部上游的服务器。
+    ownership = models.CharField(max_length=12, default='unknown', choices=[
+        ('unknown', '未知'), ('self_owned', '自有'), ('external', '外部')])
+    external_kind = models.CharField(max_length=12, null=True, blank=True, choices=[
+        ('node', '外部节点'), ('subscription', '上游订阅来源')])
+    protocol = models.CharField(max_length=24, null=True, blank=True)
+    endpoint_host = models.CharField(max_length=253, null=True, blank=True)
+    endpoint_port = models.PositiveIntegerField(null=True, blank=True)
+    evidence_source = models.CharField(max_length=120, blank=True, default='')
+    evidence_observed_at = models.DateTimeField(null=True, blank=True)
+    purchase_meter_id = models.CharField(max_length=64, null=True, blank=True)
+
+    class Meta:
+        constraints = [
+            models.CheckConstraint(condition=models.Q(endpoint_port__isnull=True)
+                | models.Q(endpoint_port__gte=1, endpoint_port__lte=65535), name='egress_valid_endpoint_port'),
+            models.CheckConstraint(condition=models.Q(ownership__in=['unknown', 'self_owned', 'external']),
+                name='egress_known_ownership'),
+            models.CheckConstraint(condition=models.Q(external_kind__isnull=True)
+                | models.Q(ownership='external', external_kind__in=['node', 'subscription']),
+                name='egress_external_kind_compatible'),
+            models.CheckConstraint(condition=models.Q(next_egress__isnull=True)
+                | ~models.Q(pk=models.F('next_egress')), name='egress_no_self_loop'),
+        ]
 
 
 class Line(models.Model):
@@ -159,6 +198,11 @@ class CoreInstance(models.Model):
     registered_version = models.CharField(max_length=80, null=True, blank=True)
     configuration_owner = models.CharField(max_length=100)
     configuration_version = models.CharField(max_length=80, blank=True, default='')
+    service_unit = models.CharField(max_length=100, null=True, blank=True)
+    owner_state = models.CharField(max_length=16, default='unknown', choices=[
+        ('unknown', '未知'), ('observed_only', '仅观察到'), ('verified', '已核验')])
+    evidence_source = models.CharField(max_length=120, blank=True, default='')
+    evidence_observed_at = models.DateTimeField(null=True, blank=True)
     notes = models.TextField(blank=True, default='', max_length=1000)
     revision = models.PositiveIntegerField(default=1)
     ingresses = models.ManyToManyField(Ingress, blank=True, related_name='core_instances')
@@ -177,6 +221,42 @@ class InventoryMutationReceipt(models.Model):
 
     class Meta:
         constraints = [models.UniqueConstraint(fields=['actor', 'key'], name='unique_inventory_mutation_key')]
+
+
+class ResourceImportBinding(models.Model):
+    """外部盘点标识与既有资源的明确映射；目标由导入事务核验。"""
+    source = models.CharField(max_length=80)
+    resource_kind = models.CharField(max_length=12, choices=[
+        ('server', '服务器'), ('core', '核心'), ('ingress', '入口'), ('egress', '出口'), ('line', '线路')])
+    source_id = models.CharField(max_length=120)
+    target_pk = models.PositiveBigIntegerField()
+    source_revision = models.PositiveIntegerField()
+    fingerprint = models.CharField(max_length=64)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=['source', 'resource_kind', 'source_id'], name='unique_resource_import_source'),
+            models.UniqueConstraint(fields=['resource_kind', 'target_pk'], name='unique_resource_import_target'),
+            models.CheckConstraint(condition=models.Q(source_revision__gte=1, target_pk__gte=1),
+                name='resource_import_positive_version'),
+            models.CheckConstraint(condition=models.Q(resource_kind__in=['server', 'core', 'ingress', 'egress', 'line']),
+                name='resource_import_known_kind'),
+        ]
+
+
+class ResourceImportReceipt(models.Model):
+    """来源批次的幂等回执，不占用人工资料编辑回执。"""
+    source = models.CharField(max_length=80)
+    revision = models.PositiveIntegerField()
+    fingerprint = models.CharField(max_length=64)
+    response = models.JSONField(default=dict)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=['source', 'revision'], name='unique_resource_import_receipt'),
+            models.CheckConstraint(condition=models.Q(revision__gte=1), name='resource_receipt_positive_version'),
+        ]
 
 
 class ServerObservation(models.Model):
@@ -227,6 +307,37 @@ class CheckResult(models.Model):
                        ), name='inventory_check_one_target')]
         indexes = [models.Index(fields=['line', '-observed_at'], name='line_check_latest'),
                    models.Index(fields=['server', '-observed_at'], name='server_check_latest')]
+
+
+class ResourceCheckJob(models.Model):
+    """固定目标的受限检查队列；租约到期需由工作器收口失败。"""
+    public_id = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
+    actor = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
+    idempotency_key = models.CharField(max_length=100)
+    request_fingerprint = models.CharField(max_length=64)
+    target_kind = models.CharField(max_length=24)
+    target_id = models.CharField(max_length=80)
+    target_version = models.CharField(max_length=64)
+    action = models.CharField(max_length=24)
+    state = models.CharField(max_length=24, default='queued', choices=[
+        ('queued', '排队'), ('running', '执行中'), ('completed', '已结束')])
+    created_at = models.DateTimeField(auto_now_add=True)
+    started_at = models.DateTimeField(null=True, blank=True)
+    finished_at = models.DateTimeField(null=True, blank=True)
+    lease_until = models.DateTimeField(null=True, blank=True)
+    result = models.ForeignKey(CheckResult, null=True, blank=True, on_delete=models.PROTECT)
+    failure_code = models.CharField(max_length=40, blank=True, default='')
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=['actor', 'idempotency_key'], name='unique_resource_check_request'),
+            models.UniqueConstraint(fields=['target_kind', 'target_id'],
+                condition=models.Q(state__in=['queued', 'running']), name='unique_active_resource_check'),
+            models.CheckConstraint(condition=models.Q(state__in=['queued', 'running', 'completed']),
+                name='resource_check_known_state'),
+            models.CheckConstraint(condition=models.Q(target_kind__in=['server', 'core', 'ingress', 'egress', 'line']),
+                name='resource_check_known_target'),
+        ]
 
 
 class Entitlement(models.Model):

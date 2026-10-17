@@ -10,7 +10,9 @@ FIXED = {'.gitignore', 'README.md', 'panel/.gitignore', 'panel/README.md',
          'panel/manage.py', 'panel/requirements.txt', 'panel/requirements-dev.txt',
          'panel/requirements-metering.txt', 'panel/requirements-lock.txt',
          '.github/workflows/check.yml', 'panel/frontend/.gitignore',
-         'docs/panel/USER_OUTCOME_PLAN_20261001.md'}
+         'docs/panel/USER_OUTCOME_PLAN_20261001.md',
+         'panel/deploy/megabox-host-observer.service.example',
+         'panel/deploy/megabox-resource-checks.service.example'}
 PREFIXES = ('panel/portal/', 'panel/megabox/', 'panel/bridge/', 'panel/tests/',
             'panel/frontend/', 'docs/public/', 'scripts/public/')
 SECRET_PATTERNS = {

@@ -1,0 +1,38 @@
+# 本文件是待批准候选，不可直接安装；先填审核后的目标、指纹和网卡环境文件。
+[Unit]
+Description=Megabox fixed local host observation
+After=local-fs.target
+StartLimitIntervalSec=600
+StartLimitBurst=3
+
+[Service]
+Type=simple
+User=megabox-panel
+Group=megabox-panel
+WorkingDirectory=/opt/megabox-panel/current
+EnvironmentFile=/etc/megabox-panel/panel.env
+EnvironmentFile=/etc/megabox-panel/host-observer.env
+ExecStart=/opt/megabox-panel/venv/bin/python manage.py observe_host --server-id ${HOST_OBSERVER_SERVER_ID} --fingerprint ${HOST_OBSERVER_FINGERPRINT} --interface ${HOST_OBSERVER_INTERFACE} --samples 0
+Restart=on-failure
+RestartSec=60
+UMask=0077
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/var/lib/megabox-panel
+# 不用PrivateNetwork：它会改变被观测的本机网络命名空间。
+RestrictAddressFamilies=AF_UNIX
+IPAddressDeny=any
+# 以下是待实机验收的限额，不是已测占用；预算不适合时先停止审批，不改核心配额。
+MemoryMax=128M
+CPUQuota=5%
+TasksMax=8
+TimeoutStopSec=10
+StandardOutput=journal
+StandardError=journal
+LogRateLimitIntervalSec=300
+LogRateLimitBurst=20
+
+[Install]
+WantedBy=multi-user.target

@@ -4,6 +4,7 @@ import re
 from datetime import timedelta
 
 from django.db import IntegrityError, transaction
+from django.db.models import Q
 from django.core.exceptions import ValidationError
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
@@ -17,7 +18,9 @@ KINDS = {'server': {'service_status'}, 'core': {'core_version', 'service_status'
          'ingress': {'tcp', 'udp', 'tls'}, 'egress': {'dns', 'egress', 'tcp', 'udp'},
          'line': {'whole_path'}}
 METRICS = ('online', 'cpu_percent', 'cpu_window_seconds', 'memory_percent', 'disk_percent',
-           'network_rx_bytes', 'network_tx_bytes', 'network_interfaces')
+           'network_rx_bytes', 'network_tx_bytes', 'network_interfaces', 'boot_id', 'sample_monotonic_seconds')
+_AUTO_PREVIOUS = object()
+MAX_EGRESS_CHAIN_DEPTH = 16
 ERROR_STAGES = {'', 'connect', 'handshake', 'resolve', 'request', 'parse', 'validate', 'collect'}
 ERROR_CODES = {'', 'connection_refused', 'timeout', 'unreachable', 'tls_failed', 'dns_failed',
                'unexpected_response', 'invalid_result', 'collection_failed', 'unsupported'}
@@ -50,7 +53,44 @@ def target_key(kind, target):
     return kind + ':' + str(target.pk if kind in ('ingress', 'egress') else target.public_id)
 
 
-def _identity(kind, target):
+def _line_ingresses(target):
+    """展示用截断列表不能决定完整目标版本；只有显式完整缓存可参与。"""
+    if (hasattr(target, 'registered_additional_ingresses')
+            and getattr(target, 'registered_additional_ingresses_complete', False)):
+        extra = target.registered_additional_ingresses
+    else:
+        extra = target.additional_ingresses.all()
+    unique = {row.pk: row for row in extra if row.pk != target.ingress_id}
+    return [target.ingress] + [unique[key] for key in sorted(unique)]
+
+
+def _egress_chain_identity(target):
+    """完整出口链才可形成版本；有限深度与visited拒绝非法链。"""
+    nodes, visited = [], set()
+    current = target
+    while current is not None:
+        _require(current.pk not in visited, 'egress_chain_cycle')
+        _require(len(nodes) < MAX_EGRESS_CHAIN_DEPTH, 'egress_chain_too_deep')
+        visited.add(current.pk)
+        core = current.core_instance if current.core_instance_id is not None else None
+        nodes.append({**_identity('egress', current, include_egress_chain=False),
+                      'ownership': current.ownership, 'external_kind': current.external_kind,
+                      'execution_core': _identity('core', core) if core is not None else None})
+        next_id = current.next_egress_id
+        if next_id is None:
+            break
+        _require(next_id not in visited, 'egress_chain_cycle')
+        _require(len(nodes) < MAX_EGRESS_CHAIN_DEPTH, 'egress_chain_too_deep')
+        if 'next_egress' in current._state.fields_cache:
+            current = current.next_egress
+        else:
+            # 未预取时每一段固定查询本段与执行核心，不展开无界递归JOIN。
+            current = Egress.objects.select_related('server', 'core_instance__server').prefetch_related(
+                'core_instance__ingresses').get(pk=next_id)
+    return nodes
+
+
+def _identity(kind, target, *, include_egress_chain=True):
     """别名/备注不参与；端点引用、核心配置版本或拓扑变化使旧回执过时。"""
     base = {'kind': kind, 'id': target_key(kind, target)}
     if kind == 'server':
@@ -58,17 +98,28 @@ def _identity(kind, target):
     if kind == 'core':
         return {**base, 'server': _identity('server', target.server), 'type': target.core_type,
                 'version': target.registered_version, 'configuration_owner': target.configuration_owner,
+                'service_unit': getattr(target, 'service_unit', ''),
+                'owner_state': getattr(target, 'owner_state', 'unknown'),
                 'configuration_version': target.configuration_version,
-                'ingresses': list(target.ingresses.order_by('pk').values_list('pk', flat=True))}
+                'ingresses': sorted(row.pk for row in target.ingresses.all())}
     if kind in ('ingress', 'egress'):
         value = {**base, 'server': _identity('server', target.server),
                  'reference_digest': digest(target.config_ref)}
+        # 新端点地址参与版本；别名、备注和资料修订号不改变检测目标。
+        if hasattr(target, 'endpoint_host'):
+            value.update(endpoint_host=target.endpoint_host, endpoint_port=target.endpoint_port)
         if kind == 'ingress':
             return {**value, 'protocol': target.protocol, 'enabled': target.enabled,
-                    'cores': [_identity('core', core) for core in target.core_instances.order_by('pk')]}
-        return {**value, 'type': target.kind, 'fail_closed': target.fail_closed}
+                    'cores': [_identity('core', core) for core in sorted(target.core_instances.all(), key=lambda row: row.pk)]}
+        value.update(type=target.kind, fail_closed=target.fail_closed)
+        if getattr(target, 'protocol', None) is not None:
+            value['protocol'] = target.protocol
+        if include_egress_chain and (getattr(target, 'core_instance_id', None) is not None
+                                     or getattr(target, 'next_egress_id', None) is not None):
+            value['egress_chain'] = _egress_chain_identity(target)
+        return value
     return {**base, 'enabled': target.enabled,
-            'ingresses': [_identity('ingress', row) for row in target.all_ingresses()],
+            'ingresses': [_identity('ingress', row) for row in _line_ingresses(target)],
             'egress': _identity('egress', target.egress)}
 
 
@@ -116,12 +167,18 @@ def _number(value, high, integer=False):
 
 def _metrics(value, policy):
     _require(type(value) is dict and value.keys() <= set(METRICS) and value.keys() <= set(policy['metrics']), 'invalid_metrics')
-    result = {key: value.get(key) for key in METRICS}
+    # 老回执没有世代字段时保持原JSON形状，使升级后的严格重放仍兼容。
+    result = {key: value.get(key) for key in METRICS
+              if key not in ('boot_id', 'sample_monotonic_seconds') or key in value}
     for key, item in result.items():
         if item is None:
             continue
         if key == 'online':
             valid = type(item) is bool
+        elif key == 'boot_id':
+            valid = type(item) is str and re.fullmatch(r'[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}', item)
+        elif key == 'sample_monotonic_seconds':
+            valid = _number(item, 9007199254740991)
         elif key == 'network_interfaces':
             valid = (type(item) is list and 0 < len(item) <= 32
                      and all(type(x) is str and re.fullmatch(r'[A-Za-z0-9_.:-]{1,32}', x) for x in item)
@@ -178,25 +235,78 @@ def ingest_check(payload, *, trusted_sources):
 def freshness(row, kind, target, now=None):
     if row is None:
         return 'unknown'
-    if row.target_fingerprint != target_fingerprint(kind, target):
+    try:
+        fingerprint = target_fingerprint(kind, target)
+    except ObservationError:
+        # 环路/超深链不能沿用旧成功，也不能拿截断链计算“当前版本”。
+        return 'target_changed'
+    if row.target_fingerprint != fingerprint:
         return 'target_changed'
     if row.observed_at > (now or timezone.now()) or row.expires_at <= (now or timezone.now()):
         return 'stale'
     return 'fresh'
 
 
-def observation_projection(row, server):
+def _network_rate(row, previous, state):
+    """只有同世代、同范围的相邻有效样本可计算；累计永不写入个人账。"""
+    empty = {'network_rx_bytes_per_second': None, 'network_tx_bytes_per_second': None,
+             'network_window_seconds': None}
+    if state != 'fresh':
+        return empty, 'stale'
+    if previous is None:
+        return empty, 'unavailable'
+    current, before = row.metrics, previous.metrics
+    if current.get('online') is not True or before.get('online') is not True:
+        return empty, 'unavailable'
+    if row.source != previous.source or row.target_fingerprint != previous.target_fingerprint:
+        return empty, 'scope_changed'
+    if not current.get('boot_id') or not before.get('boot_id'):
+        return empty, 'unavailable'
+    if current['boot_id'] != before['boot_id']:
+        return empty, 'generation_changed'
+    if current.get('network_interfaces') != before.get('network_interfaces'):
+        return empty, 'scope_changed'
+    keys = ('network_rx_bytes', 'network_tx_bytes', 'sample_monotonic_seconds')
+    if not current.get('network_interfaces') or any(current.get(k) is None or before.get(k) is None for k in keys):
+        return empty, 'unavailable'
+    window = current['sample_monotonic_seconds'] - before['sample_monotonic_seconds']
+    wall_window = (row.observed_at - previous.observed_at).total_seconds()
+    # 最多两个正常周期，且前样本在本次采集时仍有效；不跨断档补速率。
+    if (not 0 < window <= 120 or wall_window <= 0 or abs(window - wall_window) > 5
+            or previous.expires_at <= row.observed_at
+            or (row.received_at and row.received_at > row.expires_at)
+            or (previous.received_at and previous.received_at > previous.expires_at)):
+        return empty, 'gap'
+    if any(current[k] < before[k] for k in keys[:2]):
+        return empty, 'counter_reset'
+    return {'network_rx_bytes_per_second': (current['network_rx_bytes'] - before['network_rx_bytes']) / window,
+            'network_tx_bytes_per_second': (current['network_tx_bytes'] - before['network_tx_bytes']) / window,
+            'network_window_seconds': window}, 'valid'
+
+
+def observation_projection(row, server, previous=_AUTO_PREVIOUS, *, now=None):
     if row is None:
         return None
+    # 列表调用方预取两条并显式传 previous（包括 None），避免逐卡额外查询。
+    if previous is _AUTO_PREVIOUS:
+        previous = ServerObservation.objects.filter(server=server).filter(
+            Q(observed_at__lt=row.observed_at) | Q(observed_at=row.observed_at, pk__lt=row.pk)
+        ).order_by('-observed_at', '-pk').first()
+    state = freshness(row, 'server', server, now)
+    rates, rate_state = _network_rate(row, previous, state)
+    # 世代与单调时钟仅留内部验算；HTTP只返回已确认的显示字段。
+    public_metrics = {key: row.metrics.get(key) for key in METRICS
+                      if key not in ('boot_id', 'sample_monotonic_seconds')}
     return {'source': row.source, 'observed_at': row.observed_at.isoformat(), 'expires_at': row.expires_at.isoformat(),
-            'freshness': freshness(row, 'server', server), 'metrics': row.metrics,
-            'scope': '一次性机器观测；网卡累计不是月用量或个人套餐流量。'}
+            'freshness': state, 'metrics': {**public_metrics, **rates}, 'rate_state': rate_state,
+            'scope': '机器观测；CPU为采样区间均值，磁盘为根文件系统，网卡累计不是月用量或个人套餐流量；速率仅取相邻有效样本。'}
 
 
 def check_projection(row):
     kind = next(key for key in TARGETS if getattr(row, key + '_id') is not None)
     target = getattr(row, kind)
     return {'id': str(row.pk), 'target_kind': kind, 'target_id': target_key(kind, target).split(':', 1)[1],
+            'target_version': row.target_fingerprint,
             'source': row.source, 'check_kind': row.check_kind, 'result': row.result,
             'latency_ms': row.latency_ms, 'error_stage': row.error_stage, 'error_code': row.error_code,
             'observed_at': row.observed_at.isoformat(), 'expires_at': row.expires_at.isoformat(),

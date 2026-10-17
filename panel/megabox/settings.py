@@ -6,6 +6,7 @@ from django.core.exceptions import ImproperlyConfigured
 BASE_DIR = Path(__file__).resolve().parent.parent
 PANEL_LIVE = os.environ.get('PANEL_LIVE') == '1'
 RULE_LIVE_WRITES_ENABLED = os.environ.get('PANEL_RULE_LIVE_WRITES_ENABLED') == '1'
+RESOURCE_IMPORT_WRITE_ENABLED = os.environ.get('PANEL_RESOURCE_IMPORT_WRITE_ENABLED') == '1'
 DEBUG = False
 SECRET_KEY = os.environ.get('PANEL_SECRET_KEY', '')
 if PANEL_LIVE and len(SECRET_KEY) < 50:
