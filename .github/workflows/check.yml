@@ -38,3 +38,36 @@ jobs:
       - run: npm ci --ignore-scripts
       - run: npm test
       - run: npm run build
+  browser-acceptance:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+          cache-dependency-path: panel/requirements-lock.txt
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: panel/frontend/package-lock.json
+      - run: python -m pip install --require-hashes -r panel/requirements-lock.txt
+      - run: npm ci --ignore-scripts
+        working-directory: panel/frontend
+      - run: node node_modules/@playwright/test/cli.js install chromium
+        working-directory: panel/frontend
+      - run: python scripts/public/build_panel_release.py --candidate --dist panel/frontend/dist --output staging/ci-candidate.tar.gz
+      - run: python scripts/public/run_browser_acceptance.py --candidate staging/ci-candidate.tar.gz
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: browser-acceptance
+          if-no-files-found: error
+          retention-days: 14
+          path: |
+            staging/browser-acceptance/run-*/acceptance.json
+            staging/browser-acceptance/run-*/playwright.json
+            staging/browser-acceptance/run-*/screenshots/**
+            staging/browser-acceptance/run-*/test-results/**

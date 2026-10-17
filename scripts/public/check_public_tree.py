@@ -14,7 +14,7 @@ FIXED = {'.gitignore', 'README.md', 'panel/.gitignore', 'panel/README.md',
          'panel/deploy/megabox-host-observer.service.example',
          'panel/deploy/megabox-resource-checks.service.example'}
 PREFIXES = ('panel/portal/', 'panel/megabox/', 'panel/bridge/', 'panel/tests/',
-            'panel/frontend/', 'docs/public/', 'scripts/public/')
+            'panel/frontend/', 'panel/acceptance/', 'docs/public/', 'scripts/public/')
 SECRET_PATTERNS = {
     '私钥正文': r'-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----',
     '服务令牌': r'(?:ctx7sk-|ghp_|github_pat_)[A-Za-z0-9_-]{20,}',
@@ -44,6 +44,11 @@ def main():
         allowed_types = {'.py', '.html', '.css', '.js', '.md', '.txt'}
         if name.startswith('panel/frontend/'):
             allowed_types |= {'.ts', '.vue', '.json', '.mjs'}
+        if name.startswith('panel/acceptance/'):
+            allowed_types |= {'.json'}
+        screenshot = (name.startswith('panel/frontend/e2e/__screenshots__/') and path.suffix == '.png')
+        if screenshot:
+            allowed_types.add('.png')
         if any(part in {'node_modules', 'dist', '.env', '.venv', '__pycache__'} for part in path.parts):
             errors.append((name, '运行材料不应提交'))
         if path.suffix not in allowed_types and name not in FIXED:
@@ -51,6 +56,16 @@ def main():
         blob = git('show', ':' + name)
         if len(blob) > 2_000_000:
             errors.append((name, '文件过大需人工审查'))
+        if screenshot:
+            # 仅允许隔离页面的PNG基线；运行报告和生产截图仍禁止入库。
+            if len(blob) < 33 or blob[:8] != b'\x89PNG\r\n\x1a\n' or blob[12:16] != b'IHDR':
+                errors.append((name, '截图基线不是有效PNG'))
+            else:
+                width = int.from_bytes(blob[16:20], 'big')
+                height = int.from_bytes(blob[20:24], 'big')
+                if not (0 < width <= 4096 and 0 < height <= 16384):
+                    errors.append((name, '截图基线尺寸超出范围'))
+            continue
         try:
             texts[name] = blob.decode('utf-8-sig')
         except UnicodeDecodeError:

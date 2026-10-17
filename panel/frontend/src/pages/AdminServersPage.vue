@@ -160,7 +160,7 @@ onUnmounted(() => { clearInterval(refreshTimer); generation++; listController?.a
       </section>
       <div v-show="activeSection === 'cores'"><ServerCoreDetails :key="detail.server.id" :cores="detail.cores" /></div>
       <section v-show="activeSection === 'nodes'" aria-label="服务器节点">
-        <div class="section-title"><h2>节点与端点</h2><RouterLink :to="{ path: '/admin/lines', query: { server_id: detail.server.id } }" @click="closeDetail">查看关联线路 →</RouterLink></div>
+        <div class="section-title"><h2>节点与端点</h2><RouterLink :to="{ path: '/admin/lines', query: { server_id: detail.server.id } }">查看关联线路 →</RouterLink></div>
         <NodeResourceList v-if="detail.nodes" :nodes="detail.nodes.items" />
         <p v-if="detail.nodes?.truncated" class="small muted">仅展示前 {{ detail.nodes.items.length }} 个节点，总数 {{ detail.nodes.total }}。</p>
         <details class="endpoint-register"><summary>原入口与出口登记</summary>

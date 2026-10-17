@@ -85,6 +85,8 @@ SITE_BRAND = os.environ.get('PANEL_SITE_BRAND', '神舟云')[:60]
 FRONTEND_ENABLED = os.environ.get('PANEL_FRONTEND_ENABLED') == '1'
 FRONTEND_RELEASE_ROOT = os.environ.get('PANEL_FRONTEND_RELEASE_ROOT', '')
 FRONTEND_MANIFEST_SHA256 = os.environ.get('PANEL_FRONTEND_MANIFEST_SHA256', '')
+# 只接受发行读取层验证过的显式历史清单；默认不保留额外目录。
+FRONTEND_COMPAT_RELEASES = os.environ.get('PANEL_FRONTEND_COMPAT_RELEASES', '[]')
 # 元数据编辑不触碰运行配置；生产须单独启用这一能力。
 INVENTORY_METADATA_WRITE_ENABLED = os.environ.get('PANEL_INVENTORY_METADATA_WRITE_ENABLED', '0' if PANEL_LIVE else '1') == '1'
 CANDIDATE_DEMO_DATA = not PANEL_LIVE and os.environ.get('PANEL_CANDIDATE_DEMO_DATA') == '1'

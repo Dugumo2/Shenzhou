@@ -11,7 +11,8 @@
     "typecheck": "vue-tsc --noEmit",
     "build": "npm run typecheck && vite build",
     "test": "node --experimental-strip-types --test tests/*.test.ts",
-    "preview": "vite preview --host 127.0.0.1"
+    "preview": "vite preview --host 127.0.0.1",
+    "test:browser": "python ../../scripts/public/run_browser_acceptance.py"
   },
   "dependencies": {
     "element-plus": "2.11.3",
@@ -19,6 +20,7 @@
     "vue-router": "4.5.1"
   },
   "devDependencies": {
+    "@playwright/test": "1.61.1",
     "@types/node": "24.5.2",
     "@vitejs/plugin-vue": "6.0.1",
     "typescript": "5.9.2",

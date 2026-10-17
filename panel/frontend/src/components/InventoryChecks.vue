@@ -10,6 +10,8 @@ const now = useInventoryClock()
 const job = ref<InventoryCheckJob | null>(null)
 const busy = ref(false)
 const message = ref('')
+const permissionDenied = ref(false)
+const requestDeadlineMs = 15_000
 const pending = ref<{target_kind:string;target_id:string;target_version:string;action:string;idempotency_key:string} | null>(null)
 let epoch = 0
 let timer: ReturnType<typeof setTimeout> | undefined
@@ -19,10 +21,38 @@ const active = computed(() => job.value && job.value.state !== 'completed')
 const jobStates: Record<string,string> = {queued:'等待后台执行',running:'正在检查',completed:'检查已结束'}
 const failures: Record<string,string> = {permission_denied:'管理员权限已失效',target_version_changed:'目标版本已变化，旧任务已停止',target_unavailable:'目标关系无效或超出检查范围，请先核对资源资料',worker_deadline_exceeded:'后台未在期限内完成，请读取状态或稍后重试',action_not_allowed:'此动作已从批准目录移除',action_policy_changed:'固定检查范围在执行期间发生变化，结果未采纳',policy_unavailable:'检查目录暂不可用',invalid_policy:'检查目录不符合要求'}
 function reset() {
-  epoch++; clearTimeout(timer); controller?.abort(); busy.value=false; job.value=null; pending.value=null; message.value=''
+  epoch++; clearTimeout(timer); controller?.abort(); busy.value=false; job.value=null; pending.value=null; message.value=''; permissionDenied.value=false
 }
-watch(signature, reset)
+watch(signature, reset, { flush: 'sync' })
 onBeforeUnmount(reset)
+async function boundedRequest(path: string, method: string, body: unknown, requestController: AbortController) {
+  // 独立结束等待，不能依赖底层请求一定响应 abort；迟到结果不会重新进入组件。
+  let deadline: ReturnType<typeof setTimeout> | undefined
+  let cancel: () => void = () => {}
+  try {
+    return await new Promise<InventoryCheckJob>((resolve, reject) => {
+      cancel = () => reject(new ApiError(0, 'REQUEST_ABORTED', '本次请求已取消。'))
+      requestController.signal.addEventListener('abort', cancel, { once: true })
+      deadline = setTimeout(() => {
+        reject(new ApiError(0, 'CHECK_REQUEST_TIMEOUT', method === 'POST'
+          ? '提交等待已超过15秒，结果未知。请求标识已保留；可手动重试同一检查以确认原任务。'
+          : '读取等待已超过15秒，当前任务已保留，结果未知；可手动重新读取任务状态。'))
+        requestController.abort()
+      }, requestDeadlineMs)
+      request<InventoryCheckJob>(path, method, body, requestController.signal).then(resolve, reject)
+    })
+  } finally {
+    clearTimeout(deadline)
+    requestController.signal.removeEventListener('abort', cancel)
+  }
+}
+function failed(error: unknown) {
+  message.value=errorMessage(error)
+  if (error instanceof ApiError && (error.status === 401 || error.status === 403)) {
+    // 撤权后不沿用旧目录恢复动作，也不继续读取旧任务。
+    permissionDenied.value=true; pending.value=null; job.value=null; clearTimeout(timer)
+  }
+}
 function accept(value: InventoryCheckJob) {
   job.value=value
   if (value.state === 'completed') {
@@ -39,26 +69,26 @@ function accept(value: InventoryCheckJob) {
   timer=setTimeout(() => { void readJob() }, 1500)
 }
 async function readJob() {
-  if (!job.value || busy.value) return
+  if (!job.value || busy.value || permissionDenied.value) return
   const own=epoch, id=job.value.id
   busy.value=true; clearTimeout(timer); controller=new AbortController()
   try {
-    const result=await request<InventoryCheckJob>(`/admin/resource-checks/${encodeURIComponent(id)}`, 'GET', undefined, controller.signal)
+    const result=await boundedRequest(`/admin/resource-checks/${encodeURIComponent(id)}`, 'GET', undefined, controller)
     if(own===epoch) accept(result)
-  } catch(error) { if(own===epoch) message.value=errorMessage(error) }
+  } catch(error) { if(own===epoch) failed(error) }
   finally { if(own===epoch) busy.value=false }
 }
 async function start(action: InventoryCheckAction) {
-  if (busy.value || active.value || !props.actions.some(a => a.target_id===action.target_id && a.target_kind===action.target_kind && a.target_version===action.target_version && a.action===action.action)) return
-  if (pending.value && (pending.value.target_id!==action.target_id || pending.value.target_kind!==action.target_kind || pending.value.action!==action.action)) return
+  if (busy.value || active.value || permissionDenied.value || !props.actions.some(a => a.target_id===action.target_id && a.target_kind===action.target_kind && a.target_version===action.target_version && a.action===action.action)) return
+  if (pending.value && (pending.value.target_id!==action.target_id || pending.value.target_kind!==action.target_kind || pending.value.target_version!==action.target_version || pending.value.action!==action.action)) return
   pending.value ||= {target_kind:action.target_kind,target_id:action.target_id,target_version:action.target_version,action:action.action,idempotency_key:crypto.randomUUID()}
   const own=epoch; busy.value=true; message.value='正在提交固定检查…'; controller=new AbortController()
   try {
-    const value=await request<InventoryCheckJob>('/admin/resource-checks','POST',pending.value,controller.signal)
+    const value=await boundedRequest('/admin/resource-checks','POST',pending.value,controller)
     if(own===epoch) accept(value)
   } catch(error) {
     if(own===epoch) {
-      message.value=errorMessage(error)
+      failed(error)
       // 网络中断保留同一请求标识，重试不会再执行一次。
       if(error instanceof ApiError && error.status >= 400 && error.status < 500 && error.status !== 409) pending.value=null
     }
@@ -74,12 +104,13 @@ const targets: Record<string,string> = { server:'服务器', core:'核心', ingr
     <div v-if="actions.length" class="check-actions">
       <h3>发起固定检查</h3>
       <div v-for="action in actions" :key="`${action.target_kind}:${action.target_id}:${action.action}`" class="check-action">
-        <el-button :disabled="busy || !!active || (!!pending && (pending.target_id !== action.target_id || pending.target_kind !== action.target_kind || pending.action !== action.action))" @click="start(action)">{{ pending && !job ? '重试：' : '' }}{{ action.label }}</el-button>
+        <el-button :disabled="busy || permissionDenied || !!active || (!!pending && (pending.target_id !== action.target_id || pending.target_kind !== action.target_kind || pending.action !== action.action))" @click="start(action)">{{ pending && !job ? '重试：' : '' }}{{ action.label }}</el-button>
         <p class="small muted">{{ action.scope }} · 最长 {{ action.timeout_seconds }} 秒 · 每目标间隔 {{ action.min_interval_seconds }} 秒</p>
       </div>
     </div>
     <p v-else class="small muted">此资源暂无已批准的固定检查动作。</p>
     <p class="small muted">本批固定动作不测试认证、DNS、UDP、出口与整链，这些阶段均为 NOT TESTED。</p>
+    <p v-if="actions.length" class="small muted">提交和读取最多等待15秒；等待超时不代表后台检查失败或通过，不会自动重发检查。</p>
     <div v-if="job" class="job-status">
       <strong>{{ jobStates[job.state] }}</strong><span> · {{ kinds[job.action] || job.action }} · {{ targets[job.target_kind] || job.target_kind }} #{{ job.target_id.slice(0,8) }}</span>
       <p class="small">任务 {{ job.id }} · 目标版本 {{ job.target_version.slice(0,12) }}</p>

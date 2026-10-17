@@ -6,10 +6,12 @@ import App from './App.vue'
 import { router } from './router'
 import { clearSession } from './auth'
 import { setUnauthorizedHandler } from './api'
+import { installReleaseRecovery } from './releaseRecovery'
 import './style.css'
 setUnauthorizedHandler(() => {
   const redirect = router.currentRoute.value.fullPath
   clearSession()
   if (router.currentRoute.value.name !== 'login') void router.replace({ path: '/login', query: { redirect, expired: '1' } })
 })
+installReleaseRecovery(router)
 createApp(App).use(router).use(ElementPlus, { locale: zhCn }).mount('#app')

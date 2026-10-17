@@ -1,0 +1,697 @@
+{
+  "schema_version": 1,
+  "contract_id": "shenzhou-critical-paths",
+  "revision": "2026-10-18",
+  "task_id": "SZC-6.1.7.1",
+  "description": "已交页面能力的保留及本批两项恢复缺陷的必要验收；不是生产验收结果或R01—R33全部交付证明。",
+  "viewports": {
+    "desktop": {
+      "width": 1440,
+      "height": 900
+    },
+    "mobile": {
+      "width": 390,
+      "height": 844
+    }
+  },
+  "execution_contract": {
+    "application": "实际Django与编译后的前端资源",
+    "routing": "hash",
+    "business_timezone": "Asia/Shanghai",
+    "locale": "zh-CN",
+    "data": "固定时间和非秘密隔离夹具；禁止使用生产账号、Cookie、节点URI或供应商凭据",
+    "result_statuses": [
+      "PASS",
+      "FAIL",
+      "BLOCKED",
+      "NOT TESTED"
+    ],
+    "required_status": "PASS",
+    "visual_rule": "必须检查实际可见图形与截图；不以源码字符串、SSR或HTTP200代替。图表、金额、日期、入口不可遮罩。",
+    "matrix_rule": "每场景按viewports运行；roles表示场景内必须覆盖的身份，不要求无意义的全笛卡尔积。每个assertion必须有实际断言结果，每个screenshot_checkpoint必须有对应视口图证据。",
+    "journey_rule": "至少一条同一浏览器会话从登录经首页可见入口走完本人列表、详情、时间图、连接与指南，再进入规则及资源页；不得仅由各路由直接打开凑全。",
+    "release_rule": "报告绑定契约字节摘要、Git和被验收发行包；缺场景、缺断言、缺视口、缺截图、skip或非PASS不能满足标准发行门禁。具体证据格式由发行验证器维护。"
+  },
+  "required_scenarios": [
+    {
+      "id": "CP01-login-home",
+      "title": "登录、常用首页与本人套餐入口",
+      "requirements": [
+        "R03",
+        "R04",
+        "R10",
+        "R33"
+      ],
+      "entry_path": "/login",
+      "roles": [
+        "admin",
+        "user"
+      ],
+      "viewports": [
+        "desktop",
+        "mobile"
+      ],
+      "assertions": [
+        {
+          "id": "CP01-A01",
+          "description": "使用隔离账号通过真实登录表单进入服务；同账号会话恢复可进入服务，不重复认证提交，不把成功认证后的导航失败显示为密码错误。"
+        },
+        {
+          "id": "CP01-A02",
+          "description": "管理员可经常驻管理入口到管理总览，首屏可见“我的套餐与流量”及“进入我的服务”；从该入口进入本人列表。"
+        },
+        {
+          "id": "CP01-A03",
+          "description": "普通账号进入本人服务；空服务账号显示分配说明及指南入口，不生成虚假服务或下载资源。"
+        },
+        {
+          "id": "CP01-A04",
+          "description": "桌面与390px保留顶栏、账号入口及可发现的用户/管理员导航；页面无阻止主操作的横向溢出。"
+        }
+      ],
+      "evidence_types": [
+        "assertion-report",
+        "screenshot"
+      ],
+      "source_refs": [
+        "panel/frontend/src/pages/LoginPage.vue",
+        "panel/frontend/src/pages/AdminOverviewPage.vue",
+        "panel/frontend/src/pages/ServicesPage.vue",
+        "panel/frontend/src/layouts/WorkspaceShell.vue",
+        "panel/frontend/src/router.ts"
+      ],
+      "screenshot_checkpoints": [
+        "login",
+        "admin-home",
+        "services"
+      ]
+    },
+    {
+      "id": "CP02-service-overview",
+      "title": "同一套餐列表、圆环、原始构成与管理员对账",
+      "requirements": [
+        "R03",
+        "R04",
+        "R05",
+        "R08",
+        "R10",
+        "R13",
+        "R25"
+      ],
+      "entry_path": "/services",
+      "roles": [
+        "admin",
+        "user"
+      ],
+      "viewports": [
+        "desktop",
+        "mobile"
+      ],
+      "assertions": [
+        {
+          "id": "CP02-A01",
+          "description": "从列表卡片点击进入详情；同一public ID仅一张卡，列表、概览及管理员订阅行的额度、已用、剩余、重置、到期在同一夹具时点一致。"
+        },
+        {
+          "id": "CP02-A02",
+          "description": "实际挂载ServicePage→UsageOverview→UsageDashboard：可见[data-chart=quota-gauge]圆环、额度/已用/剩余数字，不得只剩数字卡或细进度条。"
+        },
+        {
+          "id": "CP02-A03",
+          "description": "有原始上传下载时可见[data-chart=transfer-composition]构成及正确数字；原始值与倍率后套餐消耗区分，零与未知分别表达。"
+        },
+        {
+          "id": "CP02-A04",
+          "description": "概览保留本期周期、下一重置和到期，十进制GB及上海时区；概览不是7天/月/年时间图的重复。"
+        },
+        {
+          "id": "CP02-A05",
+          "description": "本人空间（包括管理员切回本人）不出现采购预算、诊断字段、历史迁入/估算标签；资源采购变化不改变套餐余额。"
+        },
+        {
+          "id": "CP02-A06",
+          "description": "固定夹具覆盖现有p8与entitlement来源的实际入口；接入p8后圆环、原始构成、日期和软件入口仍在。"
+        }
+      ],
+      "evidence_types": [
+        "assertion-report",
+        "screenshot"
+      ],
+      "source_refs": [
+        "panel/frontend/src/pages/ServicesPage.vue",
+        "panel/frontend/src/pages/ServicePage.vue",
+        "panel/frontend/src/components/UsageOverview.vue",
+        "panel/frontend/src/components/UsageDashboard.vue",
+        "panel/frontend/src/components/ServiceMetrics.vue",
+        "panel/frontend/src/pages/AdminServicesPage.vue"
+      ],
+      "screenshot_checkpoints": [
+        "service-overview",
+        "admin-subscription"
+      ]
+    },
+    {
+      "id": "CP03-usage-periods",
+      "title": "近7天、本月、今年及线路用量明细",
+      "requirements": [
+        "R03",
+        "R08",
+        "R13",
+        "R25"
+      ],
+      "entry_path": "/services/:id",
+      "roles": [
+        "user"
+      ],
+      "viewports": [
+        "desktop",
+        "mobile"
+      ],
+      "assertions": [
+        {
+          "id": "CP03-A01",
+          "description": "从详情的流量用量入口依次选择7d/月/年，显示近7天按日、本月逐日和今年1—12月柱图[data-chart=usage-timeseries]，不得复用概览圆环充数。"
+        },
+        {
+          "id": "CP03-A02",
+          "description": "每种范围的已记录合计、原始上传/下载、套餐消耗和统计截至与对应接口范围一致；账期总量不冒充自然月合计。"
+        },
+        {
+          "id": "CP03-A03",
+          "description": "真实零、缺失、部分记录和未来时段保持不同图形及文字；历史累计不得均摊成日/月柱形。"
+        },
+        {
+          "id": "CP03-A04",
+          "description": "切换统计口径及点选柱形可读日期、数值与状态；390px保留时间选择和图表，可在图表局部滚动查看全部日期。"
+        },
+        {
+          "id": "CP03-A05",
+          "description": "线路使用明细与当前period/service_id/summary_revision一致，展示节点、倍率及生效范围、原始上传下载和套餐消耗；无记录不造零。"
+        }
+      ],
+      "evidence_types": [
+        "assertion-report",
+        "screenshot"
+      ],
+      "source_refs": [
+        "panel/frontend/src/pages/ServicePage.vue",
+        "panel/frontend/src/components/UsageOverview.vue",
+        "panel/frontend/src/components/UsageTimeline.vue",
+        "panel/frontend/src/usageTimeseries.ts"
+      ],
+      "screenshot_checkpoints": [
+        "usage-7d",
+        "usage-month",
+        "usage-year",
+        "line-usage"
+      ]
+    },
+    {
+      "id": "CP04-connections-guides",
+      "title": "连接软件选择、稳定资源与可用指南",
+      "requirements": [
+        "R05",
+        "R06",
+        "R14",
+        "R18"
+      ],
+      "entry_path": "/services/:id",
+      "roles": [
+        "user"
+      ],
+      "viewports": [
+        "desktop",
+        "mobile"
+      ],
+      "assertions": [
+        {
+          "id": "CP04-A01",
+          "description": "从详情进入连接设置，电脑→Windows→v2rayN及手机→Android→v2rayNG/SFA均保留；切换软件沿用同一服务，不新建套餐或清零。"
+        },
+        {
+          "id": "CP04-A02",
+          "description": "已提供资源显示相应分步导入/复制/下载入口；p8与已有entitlement分支均走实际挂载组件，缺下载地址或不支持适配时不给伪链接。"
+        },
+        {
+          "id": "CP04-A03",
+          "description": "路由器明确未验证适配；不将复制/下载成功表述为客户端已应用或真实通信通过。"
+        },
+        {
+          "id": "CP04-A04",
+          "description": "从所选软件跳转匹配指南，目录及正文可用，保留现有11篇内容与全文搜索；过滤不得抹掉正文步骤。"
+        }
+      ],
+      "evidence_types": [
+        "assertion-report",
+        "screenshot"
+      ],
+      "source_refs": [
+        "panel/frontend/src/pages/ServicePage.vue",
+        "panel/frontend/src/components/P8DeliveryResources.vue",
+        "panel/frontend/src/components/DeliveryResources.vue",
+        "panel/frontend/src/pages/GuidesPage.vue"
+      ],
+      "screenshot_checkpoints": [
+        "connections",
+        "guide"
+      ]
+    },
+    {
+      "id": "CP05-rules",
+      "title": "规则列表、匹配解释与既有编辑入口",
+      "requirements": [
+        "R15",
+        "R16",
+        "R17"
+      ],
+      "entry_path": "/admin/rules",
+      "roles": [
+        "admin"
+      ],
+      "viewports": [
+        "desktop",
+        "mobile"
+      ],
+      "assertions": [
+        {
+          "id": "CP05-A01",
+          "description": "由管理员导航进入规则列表，固定夹具中的既有自建规则及基础来源入口可查；保留搜索、启停、添加和编辑入口。"
+        },
+        {
+          "id": "CP05-A02",
+          "description": "执行代表性域名命中检查可见动作、来源、顺序及版本，不将规则匹配解释为网络已连通。"
+        },
+        {
+          "id": "CP05-A03",
+          "description": "在隔离可写夹具中编辑一条规则，先核冲突/错误反馈，再确认保存结果及列表；失败不显示已发布成功，不自动放宽客户端直连。"
+        },
+        {
+          "id": "CP05-A04",
+          "description": "规则来源、规则方案导航可达且保留来源/版本信息；没有权限或只读状态不显示可执行的编辑动作。"
+        }
+      ],
+      "evidence_types": [
+        "assertion-report",
+        "screenshot"
+      ],
+      "source_refs": [
+        "panel/frontend/src/pages/RulesPage.vue",
+        "panel/frontend/src/components/RuleSectionNav.vue",
+        "panel/frontend/src/pages/RuleSourcesPage.vue",
+        "panel/frontend/src/pages/RulePoliciesPage.vue"
+      ],
+      "screenshot_checkpoints": [
+        "rules",
+        "rule-editor"
+      ]
+    },
+    {
+      "id": "CP06-server-core-node",
+      "title": "服务器观测卡片、核心资料与节点层次",
+      "requirements": [
+        "R21",
+        "R23",
+        "R24",
+        "R25"
+      ],
+      "entry_path": "/admin/servers",
+      "roles": [
+        "admin"
+      ],
+      "viewports": [
+        "desktop",
+        "mobile"
+      ],
+      "assertions": [
+        {
+          "id": "CP06-A01",
+          "description": "由管理导航到非空服务器卡片，可切紧凑列表；CPU、内存、磁盘、收发速率、采样时间和状态可读，登记启用不等于在线。"
+        },
+        {
+          "id": "CP06-A02",
+          "description": "从卡片打开详情，概览、核心、节点、用量、检查分区可达；核心资料有实例类型/版本/配置所有者/关联端点，不将登记版本称为已验运行版本。"
+        },
+        {
+          "id": "CP06-A03",
+          "description": "节点资料分自有接入、出站、外部节点或上游订阅来源，保留服务器/核心关联和脱敏端点；外部HOME类资源不伪装为自有住宅服务器。"
+        },
+        {
+          "id": "CP06-A04",
+          "description": "无观测/过期/速率未知时明确表达未知或过期，不以0或健康代替；后台采样时刻不被前端刷新时间覆盖。"
+        },
+        {
+          "id": "CP06-A05",
+          "description": "保留关联线路入口和采购用量分区；运行控制/配置/升级尚未接管的限制可见，空表不是资源交付。"
+        }
+      ],
+      "evidence_types": [
+        "assertion-report",
+        "screenshot"
+      ],
+      "source_refs": [
+        "panel/frontend/src/pages/AdminServersPage.vue",
+        "panel/frontend/src/components/ServerInventoryCard.vue",
+        "panel/frontend/src/components/ServerObservationView.vue",
+        "panel/frontend/src/components/ServerCoreDetails.vue",
+        "panel/frontend/src/components/NodeResourceList.vue",
+        "panel/frontend/src/components/NodeResourceDetails.vue"
+      ],
+      "screenshot_checkpoints": [
+        "server-cards",
+        "core-details",
+        "node-details"
+      ]
+    },
+    {
+      "id": "CP07-lines",
+      "title": "线路路径、资源关联与检查范围",
+      "requirements": [
+        "R21",
+        "R22",
+        "R24"
+      ],
+      "entry_path": "/admin/lines",
+      "roles": [
+        "admin"
+      ],
+      "viewports": [
+        "desktop",
+        "mobile"
+      ],
+      "assertions": [
+        {
+          "id": "CP07-A01",
+          "description": "从服务器关联线路入口及管理导航可到线路页，卡片/列表和详情均有固定夹具真实关系投影，保留服务器过滤条件。"
+        },
+        {
+          "id": "CP07-A02",
+          "description": "路径图显示入口→核心/中间节点→出口的已有证据关系，相关节点与外部资源可查，不从名称拼出未经核验的路径。"
+        },
+        {
+          "id": "CP07-A03",
+          "description": "TCP/UDP/DNS、认证与整链的范围、证据时刻和失效状态可辨；单次TCP通过不显示整链通过，未知保持NOT TESTED。"
+        },
+        {
+          "id": "CP07-A04",
+          "description": "登记支持/不支持和实际检查通过区分；住宅失败关闭与未支持UDP限制不被宣传为已经实际验证，也不得显示自动直出兜底。"
+        }
+      ],
+      "evidence_types": [
+        "assertion-report",
+        "screenshot"
+      ],
+      "source_refs": [
+        "panel/frontend/src/pages/AdminLinesPage.vue",
+        "panel/frontend/src/components/LineInventoryCard.vue",
+        "panel/frontend/src/components/LinePathDiagram.vue",
+        "panel/frontend/src/components/InventoryChecks.vue"
+      ],
+      "screenshot_checkpoints": [
+        "line-path"
+      ]
+    },
+    {
+      "id": "CP08-permissions",
+      "title": "会话隔离、跨用户和撤权",
+      "requirements": [
+        "R04",
+        "R18",
+        "R33"
+      ],
+      "entry_path": "/services",
+      "roles": [
+        "anonymous",
+        "user",
+        "admin"
+      ],
+      "viewports": [
+        "desktop"
+      ],
+      "assertions": [
+        {
+          "id": "CP08-A01",
+          "description": "未登录打开服务/指南/管理路径要求登录，普通账号不能获取管理员页面数据；API拒绝与前端隐藏一起验证。"
+        },
+        {
+          "id": "CP08-A02",
+          "description": "普通账号请求他人服务ID被拒绝，不短暂展示他人套餐或下载入口；管理员本人用户空间仍只显示套餐字段白名单。"
+        },
+        {
+          "id": "CP08-A03",
+          "description": "身份改变或明确401/403撤权后清除旧身份数据；旧请求迟到不能回填上个身份的页面。"
+        }
+      ],
+      "evidence_types": [
+        "assertion-report",
+        "screenshot",
+        "network-log"
+      ],
+      "source_refs": [
+        "panel/frontend/src/router.ts",
+        "panel/frontend/src/auth.ts",
+        "panel/frontend/src/useSessionIdentity.ts",
+        "panel/frontend/src/useSnapshotRequest.ts",
+        "panel/frontend/src/pages/ServicePage.vue"
+      ],
+      "screenshot_checkpoints": [
+        "permission-denied"
+      ],
+      "viewport_reason": "权限矩阵与宽度无关；正常两身份导航及数据呈现由CP01/CP02双视口验证。"
+    },
+    {
+      "id": "CP09-refresh-retains-content",
+      "title": "统一刷新、失败保旧与迟到隔离",
+      "requirements": [
+        "R03",
+        "R04",
+        "R24",
+        "R25"
+      ],
+      "entry_path": "/services/:id",
+      "roles": [
+        "admin",
+        "user"
+      ],
+      "viewports": [
+        "desktop",
+        "mobile"
+      ],
+      "assertions": [
+        {
+          "id": "CP09-A01",
+          "description": "套餐详情及管理总览各只有所属页面统一刷新入口，显示正在更新/成功或失败反馈；首次加载之外不清空成整页骨架。"
+        },
+        {
+          "id": "CP09-A02",
+          "description": "成功后人为延迟或失败刷新，原圆环/图表/数字、软件选择/分区、滚动位置及原采样时间保留；错误不能把未知补零。"
+        },
+        {
+          "id": "CP09-A03",
+          "description": "重复点击同一读取去重，迟到的旧范围/旧身份响应不覆盖新结果；恢复成功后正确更新且不保留失败状态。"
+        },
+        {
+          "id": "CP09-A04",
+          "description": "服务器卡片和详情同样保留旧观测及选择；普通刷新只读取，不新增resource-checks POST或供应商主动采集。"
+        }
+      ],
+      "evidence_types": [
+        "assertion-report",
+        "screenshot",
+        "network-log"
+      ],
+      "source_refs": [
+        "panel/frontend/src/components/RefreshControl.vue",
+        "panel/frontend/src/useSnapshotRequest.ts",
+        "panel/frontend/src/pages/ServicePage.vue",
+        "panel/frontend/src/pages/AdminOverviewPage.vue",
+        "panel/frontend/src/pages/AdminServersPage.vue"
+      ],
+      "screenshot_checkpoints": [
+        "refresh-pending",
+        "refresh-failed"
+      ]
+    },
+    {
+      "id": "CP10-check-timeout",
+      "title": "固定检查有界等待与同任务恢复",
+      "requirements": [
+        "R24",
+        "R29"
+      ],
+      "entry_path": "/admin/servers",
+      "roles": [
+        "admin"
+      ],
+      "viewports": [
+        "desktop"
+      ],
+      "assertions": [
+        {
+          "id": "CP10-A01",
+          "description": "进入实际检查分区触发固定动作；POST悬挂与GET悬挂分别在实现公开的有限截止时间内结束前端busy，提供可理解的结果未知/重试状态。"
+        },
+        {
+          "id": "CP10-A02",
+          "description": "POST服务端已接收而响应丢失后只使用同一幂等键恢复；重试不创建第二个后台检查，不把网络超时标为执行失败或通过。"
+        },
+        {
+          "id": "CP10-A03",
+          "description": "GET恢复查询原任务，迟到响应、切换目标版本、离开页面及身份撤权不会污染新目标/新身份，也不无限自动轮询。"
+        },
+        {
+          "id": "CP10-A04",
+          "description": "恢复后显示具体任务/目标/范围/时间与结果；TCP或核心状态回执仍不证明认证、DNS、UDP、出口或整链。"
+        }
+      ],
+      "evidence_types": [
+        "assertion-report",
+        "screenshot",
+        "network-log"
+      ],
+      "source_refs": [
+        "panel/frontend/src/components/InventoryChecks.vue",
+        "panel/frontend/src/api.ts"
+      ],
+      "screenshot_checkpoints": [
+        "check-timeout",
+        "check-recovered"
+      ],
+      "viewport_reason": "超时/幂等/迟到矩阵固定桌面执行；检查分区的390px入口和范围文字由CP06/CP07覆盖。",
+      "delivery_state": "required_fix"
+    },
+    {
+      "id": "CP11-cross-release",
+      "title": "旧页面跨发行导航及有界恢复",
+      "requirements": [
+        "R03",
+        "R18",
+        "R30",
+        "R33"
+      ],
+      "entry_path": "/login",
+      "roles": [
+        "admin"
+      ],
+      "viewports": [
+        "desktop"
+      ],
+      "assertions": [
+        {
+          "id": "CP11-A01",
+          "description": "真实运行旧编译页面后切换到候选发行，沿首页→服务→详情导航仍可继续，旧lazy chunk被兼容提供或出现明确且有界的更新恢复，不可永久白屏。"
+        },
+        {
+          "id": "CP11-A02",
+          "description": "持续旧chunk404与同版本断网分别验证，不无限reload；恢复失败保留可理解反馈及人工重试入口。"
+        },
+        {
+          "id": "CP11-A03",
+          "description": "认证成功后导航失败的同账号重试不重复登录POST，不把导航错误归因为账号密码；恢复后会话仍能到服务。"
+        },
+        {
+          "id": "CP11-A04",
+          "description": "存在未保存输入时不自动重载丢失内容；更新流程不持久化密码/令牌，不重复规则或检查POST。"
+        },
+        {
+          "id": "CP11-A05",
+          "description": "报告记录旧版与候选构建标识、触发资源及恢复次数，实际恢复至被验收的候选包；旧资源兼容或失败证据可追溯。"
+        }
+      ],
+      "evidence_types": [
+        "assertion-report",
+        "screenshot",
+        "network-log"
+      ],
+      "source_refs": [
+        "panel/frontend/src/router.ts",
+        "panel/frontend/src/pages/LoginPage.vue",
+        "panel/frontend/src/pages/RulesPage.vue",
+        "panel/frontend/src/main.ts"
+      ],
+      "screenshot_checkpoints": [
+        "release-recovery"
+      ],
+      "viewport_reason": "构建切换/网络失败矩阵与宽度无关；恢复目标的主路径和图形由CP01—CP07双视口验收。",
+      "delivery_state": "required_fix"
+    }
+  ],
+  "delivered_scope": [
+    {
+      "id": "DS01",
+      "description": "已上线本人套餐入口、单套餐圆环/raw构成、7天/月/年时间图与连接/指南；本契约重新验收时不得复用历史PASS。",
+      "scenario_ids": [
+        "CP01-login-home",
+        "CP02-service-overview",
+        "CP03-usage-periods",
+        "CP04-connections-guides"
+      ]
+    },
+    {
+      "id": "DS02",
+      "description": "已有规则编辑/来源/方案页面及服务器、核心、节点、线路资料和主机观测；资料与固定检查不等于全功能核心接管。",
+      "scenario_ids": [
+        "CP05-rules",
+        "CP06-server-core-node",
+        "CP07-lines"
+      ]
+    },
+    {
+      "id": "DS03",
+      "description": "现有身份隔离及读取刷新保旧机制仍须以当前包重验；CP10/CP11为本批确定缺陷修复条件。",
+      "scenario_ids": [
+        "CP08-permissions",
+        "CP09-refresh-retains-content"
+      ]
+    }
+  ],
+  "undelivered_scope": [
+    {
+      "id": "UD01",
+      "requirements": [
+        "R08",
+        "R19",
+        "R20",
+        "R28"
+      ],
+      "description": "C0无损尾部计量、硬限额、完整撤销和客户端存量连接行为；已有FAIL/未全闭合不得被本地浏览器PASS覆盖。"
+    },
+    {
+      "id": "UD02",
+      "requirements": [
+        "R21",
+        "R23",
+        "R24"
+      ],
+      "description": "完整核心配置、Mux、升级/回滚、候选→检查→影响预览→应用接管及新拓扑；资源别名/备注正式写入仍受现场门禁。"
+    },
+    {
+      "id": "UD03",
+      "requirements": [
+        "R22",
+        "R24"
+      ],
+      "description": "认证、UDP、DNS、出口、整链和住宅失败关闭现场验证；TCP/服务状态检查仅证明对应层次。"
+    },
+    {
+      "id": "UD04",
+      "requirements": [
+        "R06",
+        "R09",
+        "R14",
+        "R18"
+      ],
+      "description": "完整八URL全部客户端实机导入/更新与真实通信、旧链接/身份撤销；本地软件选择和下载入口不代替实机证据。"
+    },
+    {
+      "id": "UD05",
+      "requirements": [
+        "R16",
+        "R27",
+        "R28",
+        "R29",
+        "R30"
+      ],
+      "description": "个人代理配置、CF独立运维、多机Agent与完整安装/升级/回滚目标仍按原任务交付；本契约不新增生产操作批准。"
+    }
+  ]
+}

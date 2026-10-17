@@ -7,6 +7,7 @@ import { renderToString } from '@vue/server-renderer'
 import ts from 'typescript'
 import * as vue from 'vue'
 import * as navigation from '../src/navigation.ts'
+import * as releaseRecovery from '../src/releaseRecovery.ts'
 
 const require = createRequire(import.meta.url)
 const components = new Map<string, any>()
@@ -21,6 +22,7 @@ function loadComponent(relative: string, replacements: Record<string, unknown> =
     if (name in replacements) return replacements[name]
     if (name === 'vue') return vue
     if (name === '../navigation') return navigation
+    if (name === './releaseRecovery') return releaseRecovery
     if (name.endsWith('.vue')) return { default: loadComponent(new URL(name, 'https://local/' + relative).pathname.slice(1)) }
     return require(name)
   }

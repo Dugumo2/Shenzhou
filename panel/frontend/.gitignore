@@ -2,3 +2,5 @@ node_modules/
 dist/
 .npm-cache/
 *.tsbuildinfo
+test-results/
+playwright-report/

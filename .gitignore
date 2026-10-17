@@ -24,6 +24,7 @@
 !/panel/megabox/
 !/panel/bridge/
 !/panel/tests/
+!/panel/acceptance/
 !/panel/deploy/
 /panel/deploy/*
 !/panel/deploy/megabox-host-observer.service.example
