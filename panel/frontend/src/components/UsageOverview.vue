@@ -4,47 +4,53 @@ import { useSnapshotRequest } from '../useSnapshotRequest'
 import { useSessionIdentity } from '../useSessionIdentity'
 import { auth } from '../auth'
 import RefreshControl from './RefreshControl.vue'
-import { formatDate, integerBytes } from '../display'
+import { formatDate } from '../display'
+import { selectedTimeseries } from '../usageTimeseries'
 import UsageDashboard from './UsageDashboard.vue'
 import UsageTimeline from './UsageTimeline.vue'
-import type { UsageOverviewData, UsagePeriod, CalendarPeriod } from '../usage-types'
+import type { UsageOverviewData, CalendarPeriod } from '../usage-types'
 const props = defineProps<{
   serviceId: string; refreshKey?: number; summaryOnly?: boolean
   managed?: boolean; snapshot?: UsageOverviewData | null; loading?: boolean; loadError?: string
+  selectedPeriod?: CalendarPeriod
 }>()
-const emit = defineEmits<{ 'period-change': [period: UsagePeriod] }>()
+const emit = defineEmits<{ 'period-change': [period: CalendarPeriod] }>()
 const identity = useSessionIdentity(() => auth.session)
 const reader = useSnapshotRequest<UsageOverviewData>()
-const period = ref<CalendarPeriod>('7d')
+const localPeriod = ref<CalendarPeriod>('7d')
+const period = computed({ get: () => props.selectedPeriod || localPeriod.value, set: (value: CalendarPeriod) => {
+  localPeriod.value = value
+  if (props.managed) emit('period-change', value)
+} })
 const data = computed(() => props.managed ? props.snapshot || null : reader.data.value)
 const busy = computed(() => props.managed ? !!props.loading : reader.busy.value)
 const error = computed(() => props.managed ? props.loadError || '' : reader.error.value)
 const headingId = computed(() => 'usage-' + props.serviceId + (props.summaryOnly ? '-summary' : '-detail'))
-const qualityLabel = computed(() => data.value?.summary.usage_estimate ? '套餐用量' : data.value?.quality.state === 'unknown' && integerBytes(data.value.summary.recorded_used_bytes ?? null) !== null
-  ? '部分用量已记录' : ({ measured: '当前用量已确认', stale: '显示上次记录', gap: '部分时段缺少记录', unknown: '尚未取得用量记录' })[data.value?.quality.state || 'unknown'])
+const rangeReady = computed(() => !!selectedTimeseries(data.value, period.value))
+const hasRangeResponse = computed(() => rangeReady.value || (data.value?.service_id === props.serviceId && data.value?.period === period.value))
 const periods: { id: CalendarPeriod; label: string }[] = [{ id: '7d', label: '近7天' }, { id: 'month', label: '本月' }, { id: 'year', label: '今年' }]
 function load() {
   if (props.managed) return
   return reader.load('/me/services/' + encodeURIComponent(props.serviceId) + '/usage?period=' + period.value, identity.value)
 }
 watch(() => [props.serviceId, props.refreshKey, period.value, identity.value], () => { if (!props.managed) void load() }, { immediate: true })
-watch(period, value => { if (props.managed) emit('period-change', value) })
 </script>
 <template>
-  <section class="surface usage-overview" :aria-labelledby="headingId" :aria-busy="busy">
-    <div class="section-title"><div><h2 :id="headingId">{{ summaryOnly ? '套餐流量概览' : '流量用量' }}</h2><p class="small muted">{{ summaryOnly ? '查看本期套餐额度与原始上传、下载构成。' : '按实际采样时间查看这份套餐的使用情况。' }}</p></div><RefreshControl v-if="!managed" :loading="busy" :error="error" :last-read-at="reader.lastReadAt.value" @refresh="load" /></div>
-    <el-alert v-if="error" :title="error" type="error" show-icon :closable="false" />
+  <section class="surface usage-overview" data-testid="usage-overview" :data-summary-only="!!summaryOnly" :aria-labelledby="headingId" :aria-busy="busy">
+    <div class="section-title"><div><h2 :id="headingId">{{ summaryOnly ? '套餐流量概览' : '流量用量' }}</h2><p class="small muted">{{ summaryOnly ? '查看本期套餐额度与原始上传、下载构成。' : '查看这份套餐随时间的使用情况。' }}</p></div><RefreshControl v-if="!managed" :loading="busy" :error="error" :last-read-at="reader.lastReadAt.value" @refresh="load" /></div>
+    <el-alert v-if="error && !managed" :title="error" type="error" show-icon :closable="false" />
     <template v-if="summaryOnly">
       <el-skeleton v-if="busy && !data" :rows="4" animated />
       <template v-if="data">
-        <div class="quality-line"><el-tag :type="data.quality.state === 'measured' ? 'success' : 'warning'">{{ qualityLabel }}</el-tag><span class="small muted">最后采集：{{ data.quality.collected_at ? formatDate(data.quality.collected_at) : '暂无采集记录' }}</span></div>
+        <div class="quality-line"><span class="small muted" data-testid="usage-updated-at">最近更新：{{ data.quality.collected_at ? formatDate(data.quality.collected_at) : '暂未提供' }}</span></div>
         <UsageDashboard :data="data" compact />
         <dl class="usage-dates"><div><dt>本期流量周期</dt><dd v-if="data.current_cycle">{{ formatDate(data.current_cycle.starts_at) }} 至 {{ formatDate(data.current_cycle.ends_at) }}</dd><dd v-else>当前周期尚未确认</dd></div></dl>
       </template>
     </template>
     <template v-else>
       <div class="period-selector"><el-radio-group v-model="period" aria-label="统计时间范围"><el-radio-button v-for="option in periods" :key="option.id" :value="option.id">{{ option.label }}</el-radio-button></el-radio-group></div>
-      <UsageTimeline :data="data" :period="period" :loading="busy" />
+      <div v-if="!busy && !hasRangeResponse" class="inline-note" data-testid="usage-unavailable">{{ error ? '暂时无法读取此范围，请重试。' : '暂未取得此范围的数据。' }}</div>
+      <UsageTimeline v-else :data="data" :period="period" :loading="busy" />
     </template>
   </section>
 </template>

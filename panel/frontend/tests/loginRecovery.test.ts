@@ -21,7 +21,9 @@ function authModule(send: Sender) {
   const output = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText
   const exports: any = {}, tokens: string[] = []
   new Function('require', 'exports', output)((name: string) => name === 'vue' ? vue :
-    name === './api' ? { ...api, request: send, setCsrfToken: (token: string) => tokens.push(token) } : undefined, exports)
+    name === './api' ? { ...api, request: send, setCsrfToken: (token: string) => tokens.push(token) } :
+    name === './usageRangeCache' ? { usageRangeCache: { clear() {} } } :
+    name === './usageNavigation' ? { usageNavigation: { clear() {} } } : undefined, exports)
   return { ...exports, tokens }
 }
 function loginPage(send: Sender, replace: (target: string) => Promise<unknown>, redirect?: unknown) {

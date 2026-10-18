@@ -13,6 +13,9 @@ import type { P8Delivery } from '../src/p8Delivery.ts'
 import { useSnapshotRequest } from '../src/useSnapshotRequest.ts'
 import { useSessionIdentity } from '../src/useSessionIdentity.ts'
 import * as resourceSnapshot from '../src/resourceSnapshot.ts'
+import * as usageCache from '../src/usageRangeCache.ts'
+import * as usageNavigation from '../src/usageNavigation.ts'
+import * as usageTemporal from '../src/usageTemporal.ts'
 
 const require = createRequire(import.meta.url)
 const flush = async () => { for (let i = 0; i < 16; i++) await Promise.resolve(); await vue.nextTick() }
@@ -39,7 +42,17 @@ function mount(relative: string, initialProps: Record<string, unknown>, replacem
   }).outputText
   const hooks: Array<() => void> = [], mounted: Array<() => void> = [], scope = vue.effectScope()
   const props = vue.reactive(initialProps), exports: Record<string, any> = {}, templateExports: Record<string, any> = {}
+  const sessionScope = vue.reactive({ generation: 0 })
+  const replacedAuth = (replacements['../auth'] as any)?.auth
+  if (replacedAuth) scope.run(() => vue.watch([
+    () => replacedAuth.session?.authenticated, () => replacedAuth.session?.user?.username,
+    () => replacedAuth.session?.user?.is_staff, () => replacedAuth.session?.csrf_token,
+  ], () => { sessionScope.generation++; usageCache.usageRangeCache.clear(); usageNavigation.usageNavigation.clear() }, { flush: 'sync' }))
   const localRequire = (name: string): unknown => {
+    if (name === '../auth' && replacedAuth) return { auth: replacedAuth, sessionScope }
+    if (name === '../usageRangeCache') return usageCache
+    if (name === '../usageNavigation') return usageNavigation
+    if (name === '../usageTemporal') return usageTemporal
     if (name in replacements) return replacements[name]
     if (name === 'vue') return { ...vue, onMounted: (fn: () => void) => mounted.push(fn), onBeforeUnmount: (fn: () => void) => hooks.push(fn), resolveComponent: (name: string) => name }
     if (name === '../p8Delivery') return p8
@@ -163,11 +176,12 @@ test('切换服务与软件及卸载时拒绝迟到响应', async () => {
 test('详情P8分支优先于演示；刷新失败与换账号均清除旧服务', async () => {
   const auth = vue.reactive({ session: { authenticated: true, user: { username: 'owner-a' }, environment: { is_demo: true } } })
   const route = vue.reactive({ params: { id: 'service-a' } })
-  const service = { id: 'service-a', source_type: 'p8', delivery: { download_url: null }, clients: [] }
+  const service = { id: 'service-a', source_type: 'p8', delivery: { download_url: null }, clients: [], usage: { updated_at: null } }
   let fail = false
   const ui = mount('pages/ServicePage.vue', {}, { '../auth': { auth }, 'vue-router': { useRoute: () => route }, '../api': { ...api, request: async (path: string) => {
     if (path === '/catalog/clients') return { items: [{ id: 'android', name: 'SFA', device: 'phone', os: 'Android' }] }
     if (fail) throw new api.ApiError(403, 'permission_denied', '无权访问')
+    if (path.includes('/usage?')) throw new api.ApiError(503, 'temporarily_unavailable', '暂时无法读取')
     return service
   } } })
   await flush()
@@ -204,16 +218,19 @@ test('旧会员地址别名加载后标题、用量和连接均使用同一正�
     'vue-router': { useRoute: () => vue.reactive({ params: { id: alias } }) },
     '../api': { ...api, request: async (path: string) => {
       calls.push(path)
+      if (path.includes('/usage?')) throw new api.ApiError(503, 'temporarily_unavailable', '暂时无法读取')
       return path === '/catalog/clients' ? { items: [{ id: 'android', name: 'SFA', device: 'phone', os: 'Android' }] } : response.promise
     } },
   })
-  assert.match(text(ui.render()), /#11111111/)
-  response.resolve({ id: canonical, source_type: 'p8', delivery: { download_url: null }, clients: [] })
+  assert.doesNotMatch(text(ui.render()), /#11111111/)
+  response.resolve({ id: canonical, name: '神舟云', source_type: 'p8', delivery: { download_url: null }, clients: [], usage: { updated_at: null } })
   await flush()
   ui.state.device.value = 'phone'; await flush(); ui.state.os.value = 'Android'; await flush(); ui.state.clientId.value = 'android'; await flush()
   assert.ok(calls.includes('/me/services/' + alias))
   const rendered = ui.render()
-  assert.match(text(rendered), /#22222222/)
+  assert.doesNotMatch(text(rendered), /#22222222/)
+  assert.match(text(rendered), /神舟云/)
+  assert.equal(nodes(rendered).find(item => item.type === '../components/ServiceMetrics.vue')?.props.service.id, canonical)
   assert.doesNotMatch(text(rendered), /#11111111/)
   const consuming = nodes(rendered).filter(item => ['../components/UsageOverview.vue', '../components/P8DeliveryResources.vue'].includes(item.type))
   assert.equal(consuming.length, 3)

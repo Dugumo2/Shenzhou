@@ -19,6 +19,7 @@ export function useSnapshotRequest<T>(options: SnapshotRequestOptions<T> = {}) {
     accessDenied: computed(() => state.value.error instanceof ApiError && [401, 403, 404].includes(state.value.error.status)),
     lastReadAt: computed(() => state.value.lastReadAt),
     load: controller.load,
+    prime: controller.prime,
     reset: controller.reset,
   }
 }

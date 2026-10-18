@@ -1,7 +1,16 @@
-import { reactive } from 'vue'
+import { reactive, watch } from 'vue'
+import { usageRangeCache } from './usageRangeCache'
+import { usageNavigation } from './usageNavigation'
 import { ApiError, request, setCsrfToken } from './api'
 import type { Session } from './types'
 export const auth = reactive({ session: null as Session | null, ready: false })
+// 模块级代际跨页面卸载保留；值不含账号或凭据，同会话重新读取不会误清缓存。
+export const sessionScope = reactive({ generation: 0 })
+watch([() => auth.session?.authenticated, () => auth.session?.user?.username, () => auth.session?.user?.is_staff, () => auth.session?.csrf_token], () => {
+  sessionScope.generation++
+  usageRangeCache.clear()
+  usageNavigation.clear()
+}, { flush: 'sync' })
 let loading: { promise: Promise<void>; controller: AbortController } | null = null
 let generation = 0
 let loginController: AbortController | null = null

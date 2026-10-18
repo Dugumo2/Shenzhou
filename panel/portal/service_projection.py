@@ -47,6 +47,7 @@ def unresolved(item):
         item[key] = None
     item.update(state='mapping_required', business_state='mapping_required', enabled=False,
                 status_label='资料待核对', quota_state='unknown')
+    item['service_status'] = {'state': 'mapping_required', 'label': '资料待核对', 'message': '服务来源关联需要核对。'}
     item['usage'] = {'quality': 'unknown', 'updated_at': None, 'message': '来源关联需要重新核对，当前额度与用量暂不可确认。'}
     item['delivery'] = {'state': 'blocked', 'message': '请联系管理员核对服务资料。', 'download_url': None}
     item['application'] = {'state': 'verification_required', 'desired_revision': None, 'applied_revision': None}

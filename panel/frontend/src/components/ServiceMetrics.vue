@@ -11,5 +11,11 @@ const usage = computed(() => serviceUsage(props.service))
   <div v-if="!lifecycleOnly"><dt>剩余额度</dt><dd>{{ formatGB(serviceRemaining(service), '待核算') }}</dd></div>
   <div><dt>下次流量重置</dt><dd class="date-value">{{ formatDate(service.next_reset_at) }}</dd></div>
   <div><dt>到期时间</dt><dd class="date-value">{{ formatDate(service.expires_at) }}</dd></div>
-  <div><dt>服务状态</dt><dd class="date-value">{{ service.status_label }}</dd></div>
+  <div><dt>服务状态</dt><dd class="date-value">{{ service.service_status?.label || service.status_label }}</dd></div>
+  <div class="service-number"><dt>服务编号</dt><dd class="date-value">{{ service.id }}</dd></div>
 </dl></template>
+<style scoped>
+.metrics-grid > div { min-width: 0; }
+.metrics-grid dd { overflow-wrap: anywhere; }
+.service-number { grid-column: 1 / -1; }
+</style>

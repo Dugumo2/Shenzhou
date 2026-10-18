@@ -10,7 +10,24 @@ export interface Session {
 }
 export interface Delivery { state: string; message: string; download_url: string | null }
 export interface Compatibility { state: string; message: string | null }
+export interface ServiceStatus { state: string; label: string; message: string }
+export interface MeteringDiagnostics {
+  service_id: string; period: '7d' | 'month' | 'year'; generated_at: string
+  service_status: ServiceStatus
+  metering: {
+    quality: string; evidence_quality: string; updated_at: string | null; persisted_gap: boolean
+    active_identity_count: number; evidence_identity_count: number; unverified_identity_count: number
+    ambiguous_identity_count: number; partial_observed_identity_count: number; reason_codes: string[]
+  }
+  historical_baseline: { state: 'applied' | 'none'; charged_bytes: string | null; source_observed_at: string | null }
+  coverage: {
+    state: 'complete' | 'partial' | 'missing' | 'unavailable'; message_code: string | null
+    range_start: string | null; range_end: string | null; unallocated_charged_bytes: string | null; boundary_pending_count: number
+  }
+  limitations: { lossless_tail_verified: boolean; hard_limit_verified: boolean; revocation_verified: boolean }
+}
 export interface Service {
+  service_status?: ServiceStatus
   provider_usage?: ProviderUsage
   id: string; name: string; quota_bytes: Bytes; used_bytes: Bytes; raw_bytes: Bytes
   recorded_used_bytes?: Bytes; recorded_upload_bytes?: Bytes; recorded_download_bytes?: Bytes

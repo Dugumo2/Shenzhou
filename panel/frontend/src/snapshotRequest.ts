@@ -90,6 +90,14 @@ export function createSnapshotRequest<T>(options: SnapshotRequestOptions<T> = {}
   return {
     get state() { return state },
     load,
+    /** 仅由有身份隔离的成功快照缓存预置；后续 load 仍重新验证权限。 */
+    prime(path: string, identity: string, data: T, lastReadAt: string) {
+      if (disposed) return
+      const key = JSON.stringify([identity, path])
+      if (key === state.key) return
+      reset()
+      publish({ key, data, busy: false, hasLoaded: true, error: null, lastReadAt })
+    },
     reset,
     subscribe(listener: (state: SnapshotState<T>) => void) {
       if (disposed) return () => {}

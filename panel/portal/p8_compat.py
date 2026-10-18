@@ -282,6 +282,7 @@ def _project(binding, *, detail=False):
         'remaining_bytes': None, 'next_reset_at': None, 'expires_at': None, 'usage_estimate': None,
         'state': 'verification_required', 'enabled': True, 'business_state': 'verification_required',
         'status_label': '订阅已接入',
+        'service_status': {'state': 'verification_required', 'label': '订阅已接入', 'message': '套餐资料待核对。'},
         'usage': {'quality': 'unknown', 'updated_at': None, 'message': '暂无可靠统计，当前用量和剩余待核算。'},
         'application': {'state': 'verification_required', 'desired_revision': None, 'applied_revision': None},
         'delivery': delivery,
@@ -300,7 +301,7 @@ def _project(binding, *, detail=False):
                     'recorded_used_bytes', 'recorded_upload_bytes', 'recorded_download_bytes',
                     'usage_estimate',
                     'next_reset_at', 'expires_at', 'state', 'enabled', 'business_state',
-                    'status_label', 'usage', 'application'):
+                    'status_label', 'service_status', 'usage', 'application'):
             result[key] = summary[key]
     return result
 

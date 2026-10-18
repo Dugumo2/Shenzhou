@@ -5,6 +5,7 @@ from pathlib import Path
 import shutil
 import time
 import uuid
+from unittest.mock import patch
 
 from django.conf import settings
 from django.http import Http404
@@ -64,11 +65,68 @@ class ReleaseCompatibilityTest(SimpleTestCase):
                 with self.assertRaises(Http404):release_asset(self.request,self.old_name)
 
     def test_invalid_compat_configuration_is_not_enumerated(self):
-        for entries in ([self.compat]*3,{},[{**self.compat,'extra':True}],
+        for entries in ([self.compat]*4,{},[{**self.compat,'extra':True}],
                         [{**self.compat,'expires_at':True}],[{**self.compat,'expires_at':int(time.time())+8*86400}],
                         [{**self.compat,'root':'relative'}],[{**self.compat,'manifest_sha256':'0'*64}]):
             with self.subTest(entries=entries),override_settings(FRONTEND_COMPAT_RELEASES=entries):
                 with self.assertRaises(Http404):release_asset(self.request,self.old_name)
+
+    def three_historical_releases(self,now):
+        """两个既有窗口与一个新窗口各自固定截止，模拟本批承接。"""
+        entries=[];assets=[]
+        for index in range(3):
+            root=self.root/('history-'+str(index))
+            name='assets/Page-history'+str(index)+'12345.js'
+            content=('historical chunk '+str(index)).encode()
+            digest=self.make_release(root,{name:content})
+            entries.append({'root':str(root),'manifest_sha256':digest,
+                            'expires_at':now+(60 if index<2 else 7*86400)})
+            assets.append((name,content))
+        return entries,assets
+
+    def test_three_explicit_historical_manifests_are_readable(self):
+        now=1800000000
+        entries,assets=self.three_historical_releases(now)
+        for value in (entries,json.dumps(entries)):
+            with self.subTest(environment_json=isinstance(value,str)),override_settings(FRONTEND_COMPAT_RELEASES=value),\
+                 patch('portal.frontend_release.time.time',return_value=now):
+                for name,content in assets:
+                    self.assertEqual(release_asset(self.request,name).content,content)
+                self.assertEqual(release_asset(self.request,self.new_name).content,b'new immutable chunk')
+
+    def test_four_manifests_fail_before_returning_even_first_asset(self):
+        now=1800000000
+        entries,assets=self.three_historical_releases(now)
+        with override_settings(FRONTEND_COMPAT_RELEASES=entries+[self.compat]),\
+             patch('portal.frontend_release.time.time',return_value=now):
+            for name,_ in assets:
+                with self.assertRaises(Http404):release_asset(self.request,name)
+            self.assertEqual(release_asset(self.request,self.new_name).status_code,200)
+
+    def test_each_history_expires_without_renewing_or_deleting_older_windows(self):
+        now=1800000000
+        entries,assets=self.three_historical_releases(now)
+        original=json.dumps(entries,sort_keys=True)
+        with override_settings(FRONTEND_COMPAT_RELEASES=entries):
+            for moment in (now+59,now+60,now+7*86400):
+                with self.subTest(moment=moment),patch('portal.frontend_release.time.time',return_value=moment):
+                    for entry,(name,content) in zip(entries,assets):
+                        if moment>=entry['expires_at']:
+                            with self.assertRaises(Http404):release_asset(self.request,name)
+                        else:
+                            self.assertEqual(release_asset(self.request,name).content,content)
+                        self.assertEqual((Path(entry['root'])/name).read_bytes(),content)
+                    self.assertEqual(release_asset(self.request,self.new_name).status_code,200)
+        self.assertEqual(json.dumps(entries,sort_keys=True),original)
+
+    def test_third_manifest_requires_pinned_hash_and_seven_day_boundary(self):
+        now=1800000000
+        entries,assets=self.three_historical_releases(now)
+        for invalid in ({'manifest_sha256':'0'*64},{'expires_at':now+7*86400+1}):
+            altered=[*entries[:2],{**entries[2],**invalid}]
+            with self.subTest(invalid=invalid),override_settings(FRONTEND_COMPAT_RELEASES=altered),\
+                 patch('portal.frontend_release.time.time',return_value=now):
+                with self.assertRaises(Http404):release_asset(self.request,assets[2][0])
 
     def test_current_damage_never_falls_back(self):
         digest=self.make_release(self.new,{self.old_name:b'new owns same name'})

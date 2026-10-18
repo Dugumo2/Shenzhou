@@ -34,10 +34,10 @@ watch(() => [props.data.service_id, props.data.period, metric.value], () => { se
         </div>
         <dl class="quota-legend"><div><dt>本期额度</dt><dd>{{ bytes(data.summary.quota_bytes) }}</dd></div><div><dt>{{ estimate ? '套餐已用' : gauge.mode === 'current' ? '套餐已用' : '已记录用量' }}</dt><dd>{{ bytes(displayedUsed) }}</dd></div><div><dt>{{ estimate ? '剩余流量' : '剩余流量' }}</dt><dd>{{ bytes(estimate?.remaining_bytes ?? data.summary.remaining_bytes) }}</dd></div></dl>
       </div>
-      <p class="chart-note">{{ estimate ? '查看本期套餐额度与用量。' : gauge.mode === 'recorded' ? recordedOnly ? '仅表示已记录部分的用量占比；灰色部分不代表当前可用余额。' : '仅表示上次确认的用量占比；灰色部分不代表当前可用余额。' : gauge.mode === 'unknown' ? '统计或额度尚未确认，暂不绘制占比。' : '按已应用额度及已确认套餐用量计算。' }}</p>
+      <p v-if="!compact" class="chart-note">{{ estimate ? '查看本期套餐额度与用量。' : gauge.mode === 'recorded' ? recordedOnly ? '仅表示已记录部分的用量占比；灰色部分不代表当前可用余额。' : '仅表示上次确认的用量占比；灰色部分不代表当前可用余额。' : gauge.mode === 'unknown' ? '统计或额度尚未确认，暂不绘制占比。' : '按已应用额度及已确认套餐用量计算。' }}</p>
     </article>
     <article class="dashboard-card" :aria-label="estimate ? '上传下载构成' : '已确认上传下载构成'">
-      <h3>{{ estimate ? '上传与下载' : recordedOnly ? '已记录传输量' : '已确认传输量' }}</h3><p class="chart-note">{{ estimate ? '本期上传与下载构成。' : recordedOnly ? '本期已记录部分的原始传输量，未乘流量倍率；缺失时段未补齐。' : '本期原始传输量，未乘流量倍率。' }}</p>
+      <h3>{{ estimate ? '上传与下载' : recordedOnly ? '已记录传输量' : '已确认传输量' }}</h3><p v-if="!compact" class="chart-note">{{ estimate ? '本期上传与下载构成。' : recordedOnly ? '本期已记录部分的原始传输量，未乘流量倍率；缺失时段未补齐。' : '本期原始传输量，未乘流量倍率。' }}</p>
       <div class="transfer-total"><strong>{{ transfer ? bytes(transfer.total) : '待核算' }}</strong><span>上传 + 下载</span></div>
       <div v-if="transfer && !transfer.empty" class="transfer-bar" role="img" data-chart="transfer-composition" :aria-label="(estimate ? '上传占比 ' : '已确认上传占比 ') + transfer.upPercent + '%，下载占比 ' + transfer.downPercent + '%'"><span class="upload" :style="{width:transfer.upPercent+'%'}"></span><span class="download" :style="{width:transfer.downPercent+'%'}"></span></div>
       <div v-else class="transfer-empty" data-chart="transfer-composition" role="img" :aria-label="transfer ? '已确认上传和下载均为零' : '上传下载尚未记录'">{{ transfer ? '已确认记录为零' : '等待可靠统计' }}</div>

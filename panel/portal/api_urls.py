@@ -30,6 +30,7 @@ urlpatterns = [
     path('catalog/clients', api.clients, name='clients'),
     path('catalog/clients/<str:client_id>/guide', api.client_guide, name='client_guide'),
     path('admin/services', api.admin_services, name='admin_services'),
+    path('admin/services/<uuid:service_id>/metering', usage_api.admin_service_metering, name='admin_service_metering'),
     path('admin/rules', rule_api.rules, name='admin_rules'),
     path('admin/rules/preview', rule_api.preview, name='rule_preview'),
     path('admin/rules/<int:rule_id>', rule_api.rule_detail, name='rule_detail'),

@@ -96,7 +96,7 @@ test('CP09 刷新等待失败保留与恢复', async ({ page }, info) => {
     await expect(page.locator('[data-chart="quota-gauge"]')).toBeVisible()
     await expect(refresh(page)).toContainText('已读取最新可用数据')
     const original = await page.locator('.quota-legend').innerText()
-    const sampled = await page.locator('.quality-line').innerText()
+    const sampled = await page.getByTestId('usage-updated-at').innerText()
     await cp.check('CP09-A01', async () => {
       await expect(page.locator('.refresh-control')).toHaveCount(1)
       await expect(refresh(page)).toContainText('已读取最新可用数据')
@@ -115,7 +115,7 @@ test('CP09 刷新等待失败保留与恢复', async ({ page }, info) => {
       await refresh(page).getByRole('button').click()
       await expect(refresh(page)).toContainText('读取失败，已保留上次内容')
       await expect(page.locator('.quota-legend')).toHaveText(original, { useInnerText: true })
-      await expect(page.locator('.quality-line')).toHaveText(sampled, { useInnerText: true })
+      await expect(page.getByTestId('usage-updated-at')).toHaveText(sampled, { useInnerText: true })
       await expect(page.locator('[data-chart="transfer-composition"]')).toBeVisible()
       await cp.shot(page, 'refresh-failed')
       await page.getByRole('tab', { name: '连接设置', exact: true }).click()

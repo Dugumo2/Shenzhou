@@ -14,7 +14,7 @@ MIME = {'.html':'text/html; charset=utf-8', '.js':'text/javascript; charset=utf-
         '.css':'text/css; charset=utf-8', '.svg':'image/svg+xml', '.png':'image/png',
         '.woff2':'font/woff2', '.ico':'image/x-icon'}
 MAX_ASSET = 16 * 1024 * 1024
-MAX_COMPAT_RELEASES = 2
+MAX_COMPAT_RELEASES = 3
 MAX_COMPAT_SECONDS = 7 * 24 * 60 * 60
 
 def _require(value):

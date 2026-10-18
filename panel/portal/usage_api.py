@@ -141,3 +141,34 @@ def _usage_response(request, public_id, period, cursor):
                          {'reason': [exc.code]})
         value.update(schema_version=2, **views)
     return success(value)
+
+
+@endpoint(staff=True)
+def admin_service_metering(request, service_id):
+    """管理员按现行canonical服务读取诊断；不扩展本人用量接口权限。"""
+    from django.contrib.auth import get_user_model
+    from .metering_diagnostics import service_metering_diagnostics
+    from .service_projection import service_queries, valid_p8
+    from .p8_entitlement import current_entitlement
+
+    # 既有Request对象也必须重新核验数据库权限，防止撤权后继续读取诊断。
+    if not get_user_model().objects.filter(pk=request.user.pk, is_active=True, is_staff=True).exists():
+        return error('permission_denied', '此操作仅限管理员。', 403)
+    periods = request.GET.getlist('period')
+    if (set(request.GET) - {'period'} or len(periods) > 1
+            or (periods and periods[0] not in ('7d', 'month', 'year'))):
+        return error('invalid_filter', '统计范围无效。', 422)
+    period = periods[0] if periods else '7d'
+    try:
+        canonical = uuid.UUID(str(service_id))
+    except (ValueError, TypeError, AttributeError):
+        return error('not_found', '服务不存在或不可访问。', 404)
+    with _read_snapshot():
+        queries = service_queries()
+        record = queries['entitlement'].filter(public_id=canonical).first()
+        if record is None:
+            source = queries['p8'].filter(public_id=canonical).first()
+            record = current_entitlement(source) if source is not None and valid_p8(source) else None
+        if record is None:
+            return error('not_found', '服务不存在或尚无可核验的套餐计量资料。', 404)
+        return success(service_metering_diagnostics(record, canonical, period, timezone.now()))

@@ -2,8 +2,8 @@
   "schema_version": 1,
   "contract_id": "shenzhou-critical-paths",
   "revision": "2026-10-18",
-  "task_id": "SZC-6.1.7.1",
-  "description": "已交页面能力的保留及本批两项恢复缺陷的必要验收；不是生产验收结果或R01—R33全部交付证明。",
+  "task_id": "SZC-6.1.20.1",
+  "description": "保留原11场景并补齐流量加载、缓存、图表操作及状态诊断隔离的过程验收；不是生产验收结果或R01—R33全部交付证明。",
   "viewports": {
     "desktop": {
       "width": 1440,
@@ -30,7 +30,10 @@
     "visual_rule": "必须检查实际可见图形与截图；不以源码字符串、SSR或HTTP200代替。图表、金额、日期、入口不可遮罩。",
     "matrix_rule": "每场景按viewports运行；roles表示场景内必须覆盖的身份，不要求无意义的全笛卡尔积。每个assertion必须有实际断言结果，每个screenshot_checkpoint必须有对应视口图证据。",
     "journey_rule": "至少一条同一浏览器会话从登录经首页可见入口走完本人列表、详情、时间图、连接与指南，再进入规则及资源页；不得仅由各路由直接打开凑全。",
-    "release_rule": "报告绑定契约字节摘要、Git和被验收发行包；缺场景、缺断言、缺视口、缺截图、skip或非PASS不能满足标准发行门禁。具体证据格式由发行验证器维护。"
+    "release_rule": "报告绑定契约字节摘要、Git和被验收发行包；缺场景、缺断言、缺视口、缺截图、skip或非PASS不能满足标准发行门禁。具体证据格式由发行验证器维护。",
+    "process_rule": "CP12—CP14需实际操作与中间状态证据。请求受控延迟时先核请求已开始，再核等待中页面，最后释放并核结果；最终截图不能替代过程断言。浏览器时间前进只证明前端边界失效，不证明后端跨账核算。所有新截图须关联本批需求并独立审阅，不自动接受新基线。",
+    "static_compatibility_rule": "本批获准静态兼容上限由2增至3个显式历史manifest，逐项固定摘要且最长7天；承接前批窗口保留原expires_at（现有截止2026-10-25 Asia/Shanghai 02:14:05），新增历史项不得重置旧截止；仅补当前manifest不存在的合法哈希资产，当前manifest或资产损坏不得fallback。前批最多2个的部署事实保留为历史。",
+    "static_compatibility_evidence": "须关联同源码panel/portal/test_frontend_release.py的实际机器结果，覆盖3项可读、4项整表拒绝、逐项原截止及7天上界、固定摘要、当前损坏不fallback；测试存在不是PASS。该后端专属证据不冒充CP11浏览器结果，CP11现有实际恢复仍独立必验。当前发行验证器未自动消费本辅助证据，主代理发布审查须明确核验，缺证据不能宣称本批兼容扩容已通过。"
   },
   "required_scenarios": [
     {
@@ -612,6 +615,133 @@
         "release-recovery"
       ],
       "viewport_reason": "构建切换/网络失败矩阵与宽度无关；恢复目标的主路径和图形由CP01—CP07双视口验收。",
+      "delivery_state": "required_fix"
+    },
+    {
+      "id": "CP12-usage-loading-cache",
+      "title": "流量首次加载、范围缓存及失效边界",
+      "requirements": ["R03", "R04", "R08", "R25", "R33"],
+      "entry_path": "/services/:id",
+      "roles": ["admin", "user"],
+      "viewports": ["desktop", "mobile"],
+      "assertions": [
+        {
+          "id": "CP12-A01",
+          "description": "分别延迟首次7d/month/year读取，核请求开始、等待中、完成后三阶段：无对应结果时显示局部加载，不生成未记录/零桶或套用上一范围数值；完成后展示对应范围真实夹具的7/31/12桶。"
+        },
+        {
+          "id": "CP12-A02",
+          "description": "已读范围往返时，在后台请求仍被挂起时即显示该身份、canonical服务及自然范围的缓存；保持指标与页面选择，显示更新反馈，不把缓存或前端刷新时刻称为新采样。"
+        },
+        {
+          "id": "CP12-A03",
+          "description": "从已读流量页沿导航离开再返回同一服务，在重新读取完成前可复用同范围结果；不闪整页空态或丢失范围选择，缓存只在有界内存中，不把流量、Cookie或令牌永久保存到浏览器存储。"
+        },
+        {
+          "id": "CP12-A04",
+          "description": "有缓存时后台更新失败保留原图、原数值和原采样时间并给单一简短失败提示；无缓存时失败明确可重试而非真实未记录/0；恢复成功后更新结果且清除失败状态。"
+        },
+        {
+          "id": "CP12-A05",
+          "description": "快速切换范围，或同账号切换到另一不可访问服务目标并得到真实403/404后，迟到旧响应及旧失败均不能回填当前目标；重复同键读取继续去重，原有有界等待和取消隔离不退回无限busy。本项验证服务目标与权限隔离，不宣称已支持同账号合法多服务。"
+        },
+        {
+          "id": "CP12-A06",
+          "description": "退出、切换账号/权限代际及明确401/403/404后清除相关缓存；旧身份请求迟到不能回填，重新进入受拒服务不能闪现旧图、数值或下载入口，其他用户/服务缓存不得混用。"
+        },
+        {
+          "id": "CP12-A07",
+          "description": "以Asia/Shanghai跨日、跨月、跨年及每月20日00:00重置边界推进浏览器时间，验证旧自然范围/账期缓存失效并发起范围与摘要校验；页面实际验证TTL过期，容量淘汰另关联同源码缓存模块测试证据，不冒充浏览器已覆盖容量。前端边界证据不冒充后端重置、记账或C0现场通过。"
+        }
+      ],
+      "evidence_types": ["assertion-report", "screenshot", "network-log"],
+      "source_refs": [
+        "panel/frontend/src/pages/ServicePage.vue",
+        "panel/frontend/src/components/UsageOverview.vue",
+        "panel/frontend/src/components/UsageTimeline.vue",
+        "panel/frontend/src/usageRangeCache.ts",
+        "panel/frontend/src/useSnapshotRequest.ts",
+        "panel/frontend/src/useSessionIdentity.ts"
+      ],
+      "screenshot_checkpoints": ["usage-loading-7d", "usage-loading-month", "usage-loading-year", "usage-cache-pending", "usage-cache-failed", "boundary-revalidated"],
+      "delivery_state": "required_fix"
+    },
+    {
+      "id": "CP13-usage-chart-interaction",
+      "title": "柱图悬浮、键盘及触屏读数",
+      "requirements": ["R03", "R04", "R08", "R10", "R25"],
+      "entry_path": "/services/:id",
+      "roles": ["user"],
+      "viewports": ["desktop", "mobile"],
+      "assertions": [
+        {
+          "id": "CP13-A01",
+          "description": "鼠标悬浮实际柱/日期区域出现有背景、边框与留白的数据卡，日期、当前指标及突出数值清楚可读，相应柱与日期高亮；不再同时显示重复原生title。"
+        },
+        {
+          "id": "CP13-A02",
+          "description": "键盘聚焦同一数据点可读到与悬浮一致的日期、指标和数值，焦点清楚且有屏幕阅读器可访问名称；Escape可取消当前提示/固定选择，后续键盘操作仍可用。"
+        },
+        {
+          "id": "CP13-A03",
+          "description": "实际点击及触屏tap可固定选择，移开指针后数据卡仍可读；再次点同一点或Escape取消，点另一点更新；换范围/服务后不遗留旧点卡片。触屏路径使用真实浏览器触摸输入，不只调用click冒充。"
+        },
+        {
+          "id": "CP13-A04",
+          "description": "切换计费、原始上传、原始下载三指标后卡片日期/指标/突出值及精确字节与所选桶一致；真实零、未记录、未来各按原状态表达，缺失不造零，旧量衔接不摊入日/月桶。"
+        },
+        {
+          "id": "CP13-A05",
+          "description": "1440px与390px上操作首尾及中间桶、滚动与切指标后，卡片和高亮可见、文字可读，不越出视口或遮住必要操作；原线路明细和7d/month/year入口保留。"
+        }
+      ],
+      "evidence_types": ["assertion-report", "screenshot"],
+      "source_refs": [
+        "panel/frontend/src/components/UsageTimeline.vue",
+        "panel/frontend/src/usageTimeseries.ts",
+        "panel/frontend/src/components/UsageDashboard.vue"
+      ],
+      "screenshot_checkpoints": ["usage-card-hover", "usage-card-focus", "usage-card-touch"],
+      "delivery_state": "required_fix"
+    },
+    {
+      "id": "CP14-service-status-diagnostics",
+      "title": "服务业务状态、管理员诊断及编号资料",
+      "requirements": ["R03", "R04", "R08", "R13", "R24", "R33"],
+      "entry_path": "/services",
+      "roles": ["admin", "user"],
+      "viewports": ["desktop", "mobile"],
+      "assertions": [
+        {
+          "id": "CP14-A01",
+          "description": "同一服务列表、详情及管理员投影按已应用/待应用/停用/到期的真实夹具业务事实一致表达；部分覆盖或历史衔接本身不能把已应用服务改称未开通/用量待核算，也不把业务已应用宣称线路在线、完整计量或硬限额已生效。"
+        },
+        {
+          "id": "CP14-A02",
+          "description": "普通用户页面只留必要简短更新/失败状态，不堆叠采样覆盖、尾部、未分桶、指纹或迁入来源诊断；普通用户接口不泄漏仅管理员可见诊断，直接请求管理接口仍被拒绝，不以CSS隐藏代替权限隔离。"
+        },
+        {
+          "id": "CP14-A03",
+          "description": "授权管理员可从明确入口定位同服务诊断，查看有限白名单字段、原因、观测时间、影响及可做操作；与普通页面对应的后台事实一致，无凭据/他人信息或通用字典遍历；已有管理计量筛选仍表达原事实。"
+        },
+        {
+          "id": "CP14-A04",
+          "description": "本人服务列表和详情主标题匹配实际API.name，不拼内部短ID，不额外要求尚未承诺的service_name投影；编号仍在有名称的服务资料或可展开标识中可查，canonical/public ID、已有别名、原详情URL及归属关系保持。"
+        },
+        {
+          "id": "CP14-A05",
+          "description": "精简诊断及拆分状态前后，额度/已用/剩余/到期、圆环/raw/三范围图、一次衔接和原始字节事实保持；管理员仍能核对原quality与覆盖信息，不改账、抬高quality、放宽可靠标头或删除C0未完成边界来通过验收。"
+        }
+      ],
+      "evidence_types": ["assertion-report", "screenshot", "network-log"],
+      "source_refs": [
+        "panel/portal/api_helpers.py",
+        "panel/portal/usage_api.py",
+        "panel/frontend/src/pages/ServicesPage.vue",
+        "panel/frontend/src/pages/ServicePage.vue",
+        "panel/frontend/src/components/ServiceMetrics.vue"
+      ],
+      "screenshot_checkpoints": ["service-business-state", "service-identifiers", "admin-metering-diagnostics"],
       "delivery_state": "required_fix"
     }
   ],

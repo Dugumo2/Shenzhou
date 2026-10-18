@@ -40,6 +40,16 @@ function meter(changes: Partial<ResourceUsageMeter> = {}): ResourceUsageMeter {
 async function renderEntry(entry: string, props: Record<string, unknown>, responses: Record<string, unknown>) {
   const cache = new Map<string, any>(), requests: string[] = []
   const auth = vue.reactive({ session: { authenticated: true, user: { username: 'graphics-user', is_staff: false }, csrf_token: 'fixture-token' } })
+  const sessionScope = vue.reactive({ generation: 1 })
+  // 父页按自然日拒绝旧响应；固定在本次合成响应的时刻，不跳过真实边界校验。
+  const sample = Object.values(responses).find((value: any) => value?.generated_at) as UsageOverviewData | undefined
+  const fixtureNow = Date.parse(sample?.generated_at || '2026-10-03T01:00:00Z')
+  const fixtureDate = new Proxy(Date, {
+    construct: (target, args) => Reflect.construct(target, args.length ? args : [fixtureNow]),
+    get: (target, key) => key === 'now' ? () => fixtureNow : Reflect.get(target, key),
+  })
+  const timers: ReturnType<typeof setTimeout>[] = []
+  const fixtureTimeout = (callback: (...args: any[]) => void, delay: number) => { const timer = setTimeout(callback, delay); timer.unref(); timers.push(timer); return timer }
   function load(filename: string): any {
     if (cache.has(filename)) return cache.get(filename)
     const source = readFileSync(filename, 'utf8')
@@ -48,18 +58,18 @@ async function renderEntry(entry: string, props: Record<string, unknown>, respon
     const code = ts.transpileModule(content, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText
     const exports: Record<string, any> = {}
     cache.set(filename, exports)
-    new Function('require', 'exports', code)((name: string) => {
+    new Function('require', 'exports', 'Date', 'setTimeout', code)((name: string) => {
       if (name === 'vue') return vue
       if (/\/api(?:\.ts)?$/.test(name)) return { ...api, request: async (path: string) => {
         requests.push(path)
         assert.ok(path in responses, '未预期的读取：' + path)
         return responses[path]
       } }
-      if (/\/auth(?:\.ts)?$/.test(name)) return { auth }
+      if (/\/auth(?:\.ts)?$/.test(name)) return { auth, sessionScope }
       if (name === 'vue-router') return { useRoute: () => ({ params: { id: 'graphics-fixture' } }) }
       if (!name.startsWith('.')) return require(name)
       return load(resolve(dirname(filename), /\.(vue|ts)$/.test(name) ? name : name + '.ts'))
-    }, exports)
+    }, exports, fixtureDate, fixtureTimeout)
     return exports
   }
   const component = load(resolve(sourceRoot, entry)).default
@@ -73,8 +83,8 @@ async function renderEntry(entry: string, props: Record<string, unknown>, respon
     app.component(name, { setup(_props: unknown, { slots }: any) { return () => vue.h('div', slots.default?.()) } })
   }
   app.component('RouterLink', { props: ['to'], setup(props: any, { slots }: any) { return () => vue.h('a', { href: props.to }, slots.default?.()) } })
-  const html = await renderToString(app)
-  return { html, requests }
+  try { return { html: await renderToString(app), requests } }
+  finally { for (const timer of timers) clearTimeout(timer) }
 }
 
 async function renderOverview(data: UsageOverviewData, summaryOnly = false) {
@@ -84,7 +94,7 @@ async function renderOverview(data: UsageOverviewData, summaryOnly = false) {
 }
 
 test('部分已记录金额在实际列表/概览保留原圆环与原始图，不声称余额',async()=>{
-  const data=overview();data.source_type='p8';data.quality.state='gap'
+  const data=temporal(overview());data.source_type='p8';data.quality.state='gap'
   data.summary.charged_bytes=null;data.summary.remaining_bytes=null
   data.summary.recorded_used_bytes='40000000000';data.summary.recorded_upload_bytes='12000000000';data.summary.recorded_download_bytes='18000000000'
   const service={id:data.service_id,name:'神舟云',source_type:'p8',quota_bytes:'100000000000',used_bytes:null,raw_bytes:null,
@@ -106,16 +116,17 @@ test('部分真实零与无确认行的概览均保留图形，不把无记录�
   data.summary.upload_bytes=null;data.summary.download_bytes=null
   data.summary.recorded_used_bytes='0';data.summary.recorded_upload_bytes='0';data.summary.recorded_download_bytes='0'
   const zero=await renderOverview(data,true)
-  assert.match(zero,/部分用量已记录/);assert.match(zero,/已记录占比/);assert.match(zero,/0%/);assert.match(zero,/已确认记录为零/)
+  assert.match(zero,/已记录用量/);assert.match(zero,/data-testid="usage-updated-at"/);assert.match(zero,/已记录占比/);assert.match(zero,/0%/);assert.match(zero,/已确认记录为零/)
   data.summary.recorded_used_bytes=null;data.summary.recorded_upload_bytes=null;data.summary.recorded_download_bytes=null
   const missing=await renderOverview(data,true)
-  assert.match(missing,/尚未取得用量记录/);assert.match(missing,/占比待核算/);assert.doesNotMatch(missing,/0%|已确认记录为零/)
+  assert.match(missing,/data-testid="usage-updated-at"/);assert.match(missing,/占比待核算/);assert.doesNotMatch(missing,/0%|已确认记录为零/)
   for(const html of [zero,missing])for(const chart of ['quota-gauge','transfer-composition'])assert.match(html,new RegExp('data-chart="'+chart+'"'))
 })
 
 function temporal(data: UsageOverviewData, period: '7d' | 'month' | 'year' = '7d') {
   const values = period === 'year' ? [null,null,null,null,null,null,null,null,'60000000000','40000000000',null,null] : ['0','4000000000','6000000000','0','10000000000','8000000000','12000000000']
   data.period = period
+  data.generated_at = '2026-10-07T07:00:00Z'
   data.timeseries = { service_id:data.service_id, summary_revision:'r1', time_zone:'Asia/Shanghai', period, granularity:period==='year'?'month':'day', range_start:'2026-10-01T00:00:00+08:00', range_end:'2026-10-07T15:00:00+08:00', as_of:'2026-10-07T15:00:00+08:00', totals:{ state:period==='year'?'partial':'complete', charged_bytes:period==='year'?'100000000000':'40000000000',upload_bytes:'12000000000',download_bytes:'18000000000',unallocated_charged_bytes:'0' }, buckets:values.map((value,index)=>({ start:period==='year'?`2026-${String(index+1).padStart(2,'0')}-01T00:00:00+08:00`:`2026-10-${String(index+1).padStart(2,'0')}T00:00:00+08:00`,end:'2026-10-08T00:00:00+08:00',state:value===null?(index>9?'future':'missing'):'complete',is_open:index===(period==='year'?9:6),covered_through:null,charged_bytes:value,upload_bytes:value,download_bytes:value })),unallocated:[],unallocated_next_cursor:null,boundary_pending_count:0,message_code:null }
   return data
 }
@@ -158,7 +169,8 @@ test('用量真实组件只有时间柱图和范围总计，已测零与缺失�
 })
 
 test('未知历史保留完整日历图，不用旧created_at记录伪造日期用量',async()=>{
-  const data=overview(),html=await renderOverview(data)
+  const data=overview();data.period='7d'
+  const html=await renderOverview(data)
   assert.match(html,/data-chart="usage-timeseries"/)
   assert.equal((html.match(/data-state="missing"/g)||[]).length,7)
   assert.doesNotMatch(html,/class="actual-bar|class="quota-ring/)
@@ -202,22 +214,25 @@ test('月中重置后概览本期与自然月范围各读服务端值，未分�
   data.timeseries!.totals.charged_bytes='42000000000';data.timeseries!.totals.unallocated_charged_bytes='2000000000'
   data.timeseries!.unallocated=[{starts_at:'2026-10-06T23:59:00+08:00',ends_at:'2026-10-07T00:01:00+08:00',charged_bytes:'2000000000',upload_bytes:'0',download_bytes:'2000000000'}]
   const summary=await renderOverview(data,true),month=(await renderEntry('components/UsageTimeline.vue',{data,period:'month'},{})).html
-  assert.match(summary,/10 GB/);assert.match(month,/42 GB/);assert.match(month,/另有 2 GB 已计入范围合计/)
+  assert.match(summary,/10 GB/);assert.match(month,/42 GB/);assert.doesNotMatch(month,/另有 2 GB 已计入范围合计/)
+  assert.equal(data.timeseries!.totals.unallocated_charged_bytes,'2000000000')
   assert.doesNotMatch(month,/44 GB/)
 })
 
-test('真实时间图与线路明细将末尾待采样显示为持续更新，真实缺口仍明确提示',async()=>{
+test('真实时间图与线路保留部分范围金额及更新时间，普通页面不堆叠管理员诊断',async()=>{
   const data=temporal(overview()),t=data.timeseries!
   t.totals.state='partial';t.message_code='sampling_pending'
   data.line_usage={service_id:data.service_id,time_zone:'Asia/Shanghai',period:'7d',range_start:t.range_start,range_end:t.range_end,as_of:t.as_of,summary_revision:'r1',totals:t.totals,boundary_pending_count:0,message_code:'sampling_pending',lines:[{line_id:'line-public',line_name:'本人授权线路',node_name:'节点甲',multiplier:'1',effective_from:'2026-10-01T00:00:00+08:00',effective_to:null,upload_bytes:'12000000000',download_bytes:'18000000000',charged_bytes:'40000000000'}]}
   const pending=(await renderEntry('components/UsageTimeline.vue',{data,period:'7d'},{})).html
-  assert.match(pending,/当前时段持续更新，显示最近采样记录。/)
+  assert.match(pending,/统计截至/)
   assert.match(pending,/所选范围已记录/)
   assert.match(pending,/40 GB/)
   assert.doesNotMatch(pending,/部分时段缺少记录|缺失时段未补齐|所选范围合计/)
   t.message_code='partial_coverage';data.line_usage.message_code='partial_coverage'
   const gap=(await renderEntry('components/UsageTimeline.vue',{data,period:'7d'},{})).html
-  assert.match(gap,/部分时段缺少记录/)
-  assert.match(gap,/缺失时段未补齐/)
-  assert.doesNotMatch(gap,/当前时段持续更新/)
+  assert.match(gap,/所选范围已记录/)
+  assert.match(gap,/40 GB/)
+  assert.match(gap,/统计截至/)
+  assert.doesNotMatch(gap,/当前时段持续更新|部分时段缺少记录|缺失时段未补齐|所选范围合计/)
+  assert.equal(t.totals.state,'partial');assert.equal(t.message_code,'partial_coverage')
 })

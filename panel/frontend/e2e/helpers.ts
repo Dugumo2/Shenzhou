@@ -35,13 +35,15 @@ export function scenario(id: string, info: TestInfo) {
       await action()
       result.assertions.push({ id, status: 'PASS' })
     },
-    async shot(page: Page, checkpoint: string) {
-      await expect(page.locator('.el-skeleton:visible')).toHaveCount(0)
-      await expect(page.locator('.el-loading-mask:visible')).toHaveCount(0)
-      if (checkpoint !== 'refresh-pending') {
+    async shot(page: Page, checkpoint: string, options: { allowLoading?: boolean; preservePointer?: boolean } = {}) {
+      if (!options.allowLoading) {
+        await expect(page.locator('.el-skeleton:visible')).toHaveCount(0)
+        await expect(page.locator('.el-loading-mask:visible')).toHaveCount(0)
+      }
+      if (checkpoint !== 'refresh-pending' && !options.allowLoading) {
         await expect(page.locator('.refresh-button[aria-busy="true"]:visible')).toHaveCount(0)
       }
-      if (['rule-editor', 'line-usage', 'core-details', 'node-details', 'line-path', 'check-timeout', 'check-recovered', 'release-recovery'].includes(checkpoint)) {
+      if (['rule-editor', 'line-usage', 'core-details', 'node-details', 'line-path', 'check-timeout', 'check-recovered', 'release-recovery', 'admin-metering-diagnostics'].includes(checkpoint)) {
         await expect(page.locator('.el-overlay:visible')).not.toHaveClass(/el-drawer-fade-(enter|leave)/)
         await expect(page.locator('.el-drawer:visible')).toBeInViewport({ ratio: 1 })
       }
@@ -50,11 +52,11 @@ export function scenario(id: string, info: TestInfo) {
       const relative = `screenshots/${info.project.name}/${name}`
       mkdirSync(join(run, 'screenshots', info.project.name), { recursive: true })
       // 固定抽屉按真实视口取图；普通长页从顶部取全图，再恢复测试原滚动位置。
-      const fullPage = await page.locator('.el-overlay:visible').count() === 0
+      const fullPage = !options.preservePointer && await page.locator('.el-overlay:visible').count() === 0
       const scroll = await page.evaluate(() => [window.scrollX, window.scrollY])
       try {
-        if (fullPage) await page.evaluate(() => window.scrollTo(0, 0))
-        await page.mouse.move(0, 0)
+        if (fullPage && !options.preservePointer) await page.evaluate(() => window.scrollTo(0, 0))
+        if (!options.preservePointer) await page.mouse.move(0, 0)
         // 首次候选也必须连续两帧一致；不把加载罩、悬停或滚动条淡出状态存成基线。
         let previous: Buffer | undefined, stable: Buffer | undefined
         for (let attempt = 0; attempt < 20; attempt++) {
@@ -67,10 +69,14 @@ export function scenario(id: string, info: TestInfo) {
         const bytes = stable
         writeFileSync(join(run, relative), bytes)
         result.screenshots.push({ checkpoint, path: relative, sha256: hash(bytes) })
-        if (existsSync(info.snapshotPath(name))) await expect(page).toHaveScreenshot(name, { fullPage, animations: 'disabled', maxDiffPixels: 0 })
-        else {
+        if (process.env.ACCEPTANCE_BOOTSTRAP === '1') {
+          // 候选采图从不覆盖基线，整包保持待审，正常模式仍严格比对全部既有截图。
           result.visual_status = 'PENDING_REVIEW'
-          if (process.env.ACCEPTANCE_BOOTSTRAP !== '1') throw new Error(`缺少已审视觉基线：${info.snapshotPath(name)}`)
+        } else if (existsSync(info.snapshotPath(name))) {
+          await expect(page).toHaveScreenshot(name, { fullPage, animations: 'disabled', maxDiffPixels: 0 })
+        } else {
+          result.visual_status = 'PENDING_REVIEW'
+          throw new Error(`缺少已审视觉基线：${info.snapshotPath(name)}`)
         }
       } finally {
         if (fullPage) await page.evaluate(([x, y]) => window.scrollTo(x, y), scroll)

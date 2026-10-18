@@ -138,7 +138,7 @@ def service_facts(record, source_type, now):
 
 
 def service_business_status(record, source_type, facts, now):
-    """业务主状态不能仅由应用回执决定；未知用量不证明耗尽或有效。"""
+    """保留旧管理筛选和交付门禁语义；新主状态使用独立的service_status。"""
     state, expires = facts['state'], facts['expires']
     if not record.user.is_active:
         return 'account_disabled', '账号已停用', '账号已停用，请联系管理员。'
@@ -170,6 +170,34 @@ def service_business_status(record, source_type, facts, now):
                 '统计已过期或尚无可靠计量证据，请等待管理员核对。')
     # 这里只确认登记状态和已持久样本，不能作为核心限额、撤销或真实交付验收。
     return 'active', STATE_LABELS['active'], None
+
+
+def service_registration_status(record, source_type, facts, now):
+    """独立表达登记和应用事实；不把采样质量当作服务未开通，也不证明线路连通。"""
+    state, expires = facts['state'], facts['expires']
+    if not record.user.is_active:
+        return {'state': 'account_disabled', 'label': '账号已停用', 'message': '账号已停用，请联系管理员。'}
+    if state in ('disabled', 'suspended', 'disabling', 'suspension_pending', 'enforcement_pending'):
+        return {'state': state, 'label': STATE_LABELS[state], 'message': '服务已暂停或正在停用，请联系管理员。'}
+    if not facts['enabled']:
+        return {'state': 'disabled', 'label': '已停用', 'message': '服务已停用，请联系管理员。'}
+    if expires and expires <= now:
+        return {'state': 'expired', 'label': '已到期', 'message': '服务已到期，请联系管理员续期。'}
+    if facts['remaining'] == 0:
+        return {'state': 'exhausted', 'label': '本期额度已用完', 'message': '本期额度已用完，请等待下次重置与恢复核验。'}
+    if source_type == 'membership':
+        return {'state': 'verification_required', 'label': '待核验', 'message': '服务资料需要管理员核对。'}
+    if state == 'simulated':
+        return {'state': 'simulated', 'label': STATE_LABELS[state], 'message': '当前仅完成隔离验证，尚未提供可用交付。'}
+    if not facts['is_applied']:
+        business_state = state if state in STATE_LABELS and state != 'active' else 'pending'
+        return {'state': business_state, 'label': '等待应用' if state == 'active' else STATE_LABELS.get(state, '等待应用'),
+                'message': '服务尚未完成应用，请等待管理员核对。'}
+    if expires is None:
+        return {'state': 'verification_required', 'label': '有效期待核验', 'message': '服务有效期尚未确认，请联系管理员核对。'}
+    if facts['quota_state'] != 'applied':
+        return {'state': 'verification_required', 'label': '额度待核验', 'message': '服务额度尚未完成应用核验，请联系管理员。'}
+    return {'state': 'active', 'label': STATE_LABELS['active'], 'message': None}
 
 
 def matching_service_ids(query, source_type, requested_state, now):
@@ -210,6 +238,7 @@ def project_service(record, source_type, *, now=None, detail=False, administrato
               'next_reset_at': iso(facts['next_reset']), 'expires_at': iso(facts['expires']),
               'state': facts['state'], 'enabled': facts['enabled'],
               'business_state': business_state, 'status_label': status_label,
+              'service_status': service_registration_status(record, source_type, facts, now),
               'usage': {'quality': quality, 'updated_at': facts['usage_estimate']['as_of'] if facts['usage_estimate'] else iso(facts['observed']),
                         'message': '查看本期套餐用量。' if facts['usage_estimate'] else usage_messages[quality]},
               'application': facts['application'], 'delivery': delivery,

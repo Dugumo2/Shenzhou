@@ -31,7 +31,11 @@ def configure(run):
     from django.conf import settings
     assert not settings.PANEL_LIVE and not settings.OPERATOR_ENABLED
     assert settings.DATA_ROOT.resolve() == run / 'data'
-    patch('django.utils.timezone.now', return_value=NOW).start()
+    # 仅隔离验收可以推进自然日/账期；其余场景保持原固定时间。
+    def fixture_now():
+        clock = run / 'clock-state.json'
+        return datetime.fromisoformat(json.loads(clock.read_text())['now']) if clock.exists() else NOW
+    patch('django.utils.timezone.now', side_effect=fixture_now).start()
     from portal.models import ResourceCheckJob
     import uuid
     ResourceCheckJob._meta.get_field('public_id').default=lambda: uuid.uuid5(uuid.NAMESPACE_URL,
@@ -199,7 +203,48 @@ def serve(run, port):
 def control(run, operation, job_id):
     """只修改当前验收假库；不运行探测器，不建立网络连接。"""
     from django.contrib.auth import get_user_model
-    from portal.models import ResourceCheckJob, CheckResult, ServerObservation
+    from portal.models import ResourceCheckJob, CheckResult, ServerObservation, RateBucket
+    if operation == 'usage-rate-reset':
+        # 新场景开始前隔离假账号/IP计数；保留真实产品阈值和限流函数，不在失败后清理重试。
+        from django.utils.crypto import salted_hmac
+        identities = [('login-address', '127.0.0.1')] + [
+            ('login-account', name) for name in
+            ('fixture-admin', 'fixture-user', 'fixture-p8', 'fixture-empty', 'fixture-unknown')]
+        keys = [salted_hmac('rate-bucket', scope + ':' + name).hexdigest() for scope, name in identities]
+        removed, _ = RateBucket.objects.filter(key__in=keys).delete()
+        return {'isolated_fixture_rate_buckets': removed}
+    if operation == 'usage-service-state':
+        from portal.models import Entitlement
+        if job_id not in ('applied', 'waiting', 'disabled', 'expired', 'restore'):
+            raise ValueError('仅允许用量业务状态预定义夹具')
+        changes = {'state': 'simulated' if job_id == 'restore' else 'active',
+            'revision': 2 if job_id == 'waiting' else 1, 'applied_revision': 1,
+            'enabled': job_id != 'disabled',
+            'expires_at': NOW - timedelta(seconds=1) if job_id == 'expired' else datetime(2027, 12, 30, 2, 49, tzinfo=dt_timezone.utc)}
+        count = Entitlement.objects.filter(user__username='fixture-admin').update(**changes)
+        assert count == 1
+        return {'state': job_id, 'modified_service_count': count}
+    if operation == 'usage-clock':
+        allowed = {
+            NOW.isoformat(),
+            '2026-10-18T15:59:59+00:00', '2026-10-18T16:00:01+00:00',
+            '2026-10-19T15:59:59+00:00', '2026-10-19T16:00:01+00:00',
+            '2026-10-18T16:00:00.010+00:00', '2026-10-19T16:00:00.010+00:00',
+            '2026-10-31T15:59:59+00:00', '2026-10-31T16:00:01+00:00',
+            '2026-12-31T15:59:59+00:00', '2026-12-31T16:00:01+00:00',
+        }
+        if job_id not in allowed:
+            raise ValueError('仅允许用量边界验收预定义时间')
+        clock = run / 'clock-state.json'
+        previous = datetime.fromisoformat(json.loads(clock.read_text())['now']) if clock.exists() else NOW
+        target = datetime.fromisoformat(job_id)
+        if target < previous:
+            # 回拨验收时钟时只清未来计数，避免其他场景承接一个永远不会自然到期的窗口。
+            RateBucket.objects.filter(started_at__gt=target).delete()
+        temporary = run / 'clock-state.tmp'
+        temporary.write_text(json.dumps({'now': job_id}), encoding='utf-8')
+        temporary.replace(run / 'clock-state.json')
+        return {'now': job_id}
     if operation in ('release-old','release-candidate','release-recovery-old'):
         active={'release-old':'old','release-candidate':'candidate','release-recovery-old':'recovery_old'}[operation]
         temporary=run/'release-state.tmp'
@@ -235,7 +280,7 @@ if __name__ == '__main__':
     parser.add_argument('action',choices=['seed','serve','control'])
     parser.add_argument('--run',required=True)
     parser.add_argument('--port',type=int,default=18871)
-    parser.add_argument('--operation',choices=['inspect_jobs','complete_job','revoke_admin','restore_admin','reset_checks','observations_stale','observations_restore','release-old','release-candidate','release-recovery-old'])
+    parser.add_argument('--operation',choices=['inspect_jobs','complete_job','revoke_admin','restore_admin','reset_checks','observations_stale','observations_restore','release-old','release-candidate','release-recovery-old','usage-clock','usage-service-state','usage-rate-reset'])
     parser.add_argument('--job-id')
     args=parser.parse_args()
     run=configure(args.run)

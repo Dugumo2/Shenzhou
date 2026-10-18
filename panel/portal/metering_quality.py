@@ -80,6 +80,30 @@ def assess_metering(record, cycle, now=None):
     if record.metering_gap:
         quality = 'gap'
     usable = quality in ('fresh', 'stale') and complete
+    # 以下只解释已有判断，不改变质量和可用余额门禁；部分观测不等于真实断采。
+    partial_ids = {identity_id for identity_id, rows in current_streams.items()
+                   if cycle and len(rows) == 1 and rows[0]['sample_cycle_id'] == cycle.pk
+                   and rows[0]['sample_quality'] == 'partial_observed'}
+    reason_codes = []
+    if record.metering_gap:
+        reason_codes.append('persisted_gap')
+    if cycle is None:
+        reason_codes.append('overlapping_cycles' if record.cycles.filter(
+            starts_at__lte=now, ends_at__gt=now).count() > 1 else 'no_current_cycle')
+    if not active_ids:
+        reason_codes.append('no_active_identities')
+    if ambiguous_ids:
+        reason_codes.append('ambiguous_streams')
+    if missing_ids:
+        reason_codes.append('missing_complete_evidence')
+    if partial_ids:
+        reason_codes.append('partial_observed_evidence')
+    if service_future or any(value > now + FUTURE_SKEW for value in latest_by_identity.values()):
+        reason_codes.append('future_timestamp')
+    if cycle and not service_in_cycle:
+        reason_codes.append('outside_current_cycle')
+    if quality == 'stale' or evidence_quality == 'stale':
+        reason_codes.append('stale_evidence')
     return {
         'quality': quality,
         'evidence_quality': evidence_quality,
@@ -89,4 +113,6 @@ def assess_metering(record, cycle, now=None):
         'missing_identity_ids': missing_ids,
         'ambiguous_identity_ids': ambiguous_ids,
         'latest_by_identity': latest_by_identity,
+        'partial_observed_identity_count': len(partial_ids),
+        'reason_codes': reason_codes,
     }

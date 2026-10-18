@@ -37,7 +37,7 @@ test('CP01—CP07 同会话完整用户旅程', async ({ page, browser }, info) 
       for (const username of ['fixture-user','fixture-empty']) {
         const context=await browser.newContext({ viewport:info.project.use.viewport,locale:'zh-CN',timezoneId:'Asia/Shanghai',baseURL:process.env.ACCEPTANCE_BASE_URL })
         const other=await context.newPage();await other.clock.setFixedTime(new Date(fixture.fixed_time));await login(other,username)
-        if (username==='fixture-user') { await expect(other.locator('.service-card')).toHaveCount(1);await expect(other.locator('.service-card')).toContainText(fixture.service_ids[username].slice(0,8)) }
+        if (username==='fixture-user') { await expect(other.locator('.service-card')).toHaveCount(1);await expect(other.locator('.service-card').getByRole('link',{name:/查看服务与使用方法/})).toHaveAttribute('href',new RegExp(fixture.service_ids[username])) }
         else { await expect(other.getByText('请联系管理员为你分配服务。',{exact:false})).toBeVisible();await expect(other.locator('.service-card')).toHaveCount(0);await expect(other.getByRole('link',{name:'先看看使用指南 →'})).toBeVisible() }
         await context.close()
       }
@@ -95,8 +95,8 @@ test('CP01—CP07 同会话完整用户旅程', async ({ page, browser }, info) 
     })
     await cp3.check('CP03-A04',async()=>{
       await choose(page,'原始上传');await page.locator('.timeline .chart-column').nth(3).click()
-      await expect(page.locator('.chart-readout')).toContainText('10-04')
-      await expect(page.locator('.chart-readout')).toContainText('0 GB')
+      await expect(page.getByTestId('usage-point-date')).toHaveText('2026-10-04')
+      await expect(page.getByTestId('usage-point-value')).toHaveText('0 GB')
       await choose(page,'套餐消耗');await noOverflow(page)
     })
     await cp3.check('CP03-A05',async()=>{

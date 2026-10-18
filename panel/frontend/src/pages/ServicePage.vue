@@ -1,26 +1,38 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, ref, shallowRef, watch, onScopeDispose } from 'vue'
 import { useRoute } from 'vue-router'
 import { useSnapshotRequest } from '../useSnapshotRequest'
-import { useSessionIdentity } from '../useSessionIdentity'
+import { usageRangeCache, usageNaturalRange } from '../usageRangeCache'
+import { usageNavigation } from '../usageNavigation'
+import { usageResponseIsCurrent } from '../usageTemporal'
+import { ApiError } from '../api'
 import { retainServiceResources, retainResourceUsage } from '../resourceSnapshot'
-import type { UsageOverviewData, UsagePeriod } from '../usage-types'
+import type { UsageOverviewData, CalendarPeriod } from '../usage-types'
 import RefreshControl from '../components/RefreshControl.vue'
 import type { Client, Service } from '../types'
 import ServiceMetrics from '../components/ServiceMetrics.vue'
 import UsageOverview from '../components/UsageOverview.vue'
 import DeliveryResources from '../components/DeliveryResources.vue'
 import P8DeliveryResources from '../components/P8DeliveryResources.vue'
-import { auth } from '../auth'
+import { auth, sessionScope } from '../auth'
 const route = useRoute()
-const identity = useSessionIdentity(() => auth.session)
+const identity = computed(() => 'usage-session:' + sessionScope.generation)
 const serviceSnapshot = useSnapshotRequest<Service>({ reconcile: retainServiceResources })
-const usageSnapshot = useSnapshotRequest<UsageOverviewData>({ reconcile: retainResourceUsage })
+let rejectedBoundary = false, boundaryRetryUsed = false
+const usageSnapshot = useSnapshotRequest<UsageOverviewData>({ reconcile: (next, previous) => {
+  if (!usageResponseIsCurrent(next)) {
+    rejectedBoundary = true
+    throw new ApiError(0, 'USAGE_BOUNDARY_CHANGED', '用量周期已变化，请更新数据。')
+  }
+  return retainResourceUsage(next, previous)
+} })
 const catalogSnapshot = useSnapshotRequest<{ items: Client[] }>()
 const service = serviceSnapshot.data
+const canonicalId = ref<string | null>(null)
+const latestUsage = shallowRef<UsageOverviewData | null>(null)
 // 用量接口初次失败仍可展示已核实的套餐资料；不从采购资源推算任何字段。
 const summarySnapshot = computed<UsageOverviewData | null>(() => {
-  if (usageSnapshot.data.value) return usageSnapshot.data.value
+  if (latestUsage.value) return latestUsage.value
   const value = service.value
   if (!value || usageSnapshot.accessDenied.value) return null
   return { service_id: value.id, source_type: value.source_type, time_zone: 'Asia/Shanghai', generated_at: value.usage.updated_at || new Date().toISOString(), period: '7d', current_cycle: null,
@@ -30,14 +42,24 @@ const summarySnapshot = computed<UsageOverviewData | null>(() => {
     quality: { state: 'unknown', message: '', collected_at: value.usage.updated_at },
     history: { kind:'confirmed_ledger_postings', date_basis:'created_at', range_start:null, range_end:null, totals:null, record_count:0, excluded_record_count:0, days:[], day_limit:90, days_truncated:false, message:'' } }
 })
-watch(usageSnapshot.accessDenied, denied => { if (denied) serviceSnapshot.reset() }, { flush:'sync' })
+function clearServiceCache(forgetSelection = true) {
+  const id = service.value?.id || canonicalId.value || String(route.params.id)
+  usageRangeCache.clearService(identity.value, id)
+  if (forgetSelection) usageNavigation.clearService(identity.value, id)
+  latestUsage.value = null
+}
+watch(usageSnapshot.accessDenied, denied => { if (denied) { clearServiceCache(); serviceSnapshot.reset() } }, { flush:'sync' })
+watch(serviceSnapshot.accessDenied, denied => { if (denied) { clearServiceCache(); usageSnapshot.reset() } }, { flush:'sync' })
 const clients = computed(() => catalogSnapshot.data.value?.items || [])
 const busy = computed(() => serviceSnapshot.busy.value || usageSnapshot.busy.value || catalogSnapshot.busy.value)
-const error = computed(() => serviceSnapshot.error.value || catalogSnapshot.error.value)
+const boundaryError = ref('')
+const error = computed(() => serviceSnapshot.error.value || catalogSnapshot.error.value || boundaryError.value)
 const updateError = computed(() => error.value || usageSnapshot.error.value)
 const lastReadAt = ref<string | null>(null)
 const device = ref(''), os = ref(''), clientId = ref('')
-const usagePeriod = ref<UsagePeriod>('7d')
+const usagePeriod = ref<CalendarPeriod>('7d')
+let restoring = false
+let boundaryTimer: ReturnType<typeof setTimeout> | undefined
 const refreshKey = ref(0)
 const activeSection = ref('overview'), choosing = ref(true)
 const deviceOptions = [{ id: 'phone', label: '手机', hint: 'Android / iOS' }, { id: 'computer', label: '电脑', hint: 'Windows / macOS / Linux' }, { id: 'router', label: '路由器', hint: '查看适配情况' }]
@@ -55,8 +77,60 @@ watch(os, () => { clientId.value = '' })
 watch(clientId, value => { choosing.value = !value })
 async function loadUsage() {
   if (!service.value) return
-  return usageSnapshot.load('/me/services/' + encodeURIComponent(service.value.id) + '/usage?period=' + usagePeriod.value, identity.value)
+  const owner = identity.value, id = service.value.id, period = usagePeriod.value
+  const key = { identityGeneration: owner, serviceId: id, period }
+  const path = '/me/services/' + encodeURIComponent(id) + '/usage?period=' + period
+  const cached = usageRangeCache.get(key)
+  if (cached) usageSnapshot.prime(path, owner, cached.snapshot, cached.lastReadAt)
+  // 范围图可以复用旧结果，套餐概览始终采用同服务较新的摘要。
+  for (const p of ['7d', 'month', 'year'] as CalendarPeriod[]) {
+    const entry = usageRangeCache.get({ ...key, period: p })
+    if (entry) acceptSummary(entry.snapshot)
+  }
+  const value = await usageSnapshot.load(path, owner)
+  if (owner === identity.value && id === service.value?.id && rejectedBoundary) {
+    rejectedBoundary = false
+    clearServiceCache(false); usageSnapshot.reset(); serviceSnapshot.reset()
+    if (!boundaryRetryUsed) {
+      boundaryRetryUsed = true
+      clearTimeout(boundaryTimer); boundaryTimer = setTimeout(() => { void load() }, 1000)
+    } else boundaryError.value = '用量周期正在更新，请稍后点击更新数据。'
+    return
+  }
+  if (!value || owner !== identity.value || id !== service.value?.id || period !== usagePeriod.value) return
+  if (value.service_id !== id || value.period !== period) { usageSnapshot.reset(); return }
+  usageRangeCache.set(key, value, usageSnapshot.lastReadAt.value || new Date().toISOString())
+  acceptSummary(value)
+  boundaryRetryUsed = false
+  boundaryError.value = ''
+  scheduleBoundary()
+  return value
 }
+function acceptSummary(value: UsageOverviewData) {
+  if (!latestUsage.value || Date.parse(value.generated_at) >= Date.parse(latestUsage.value.generated_at)) latestUsage.value = value
+}
+function scheduleBoundary() {
+  clearTimeout(boundaryTimer)
+  if (!service.value) return
+  const now = Date.now()
+  const boundaries = [usageNaturalRange(usagePeriod.value, now).dayEnd,
+    Date.parse(latestUsage.value?.summary.next_reset_at || service.value.next_reset_at || ''),
+    Date.parse(latestUsage.value?.current_cycle?.ends_at || '')].filter(value => Number.isFinite(value) && value > now)
+  boundaryTimer = setTimeout(() => {
+    clearServiceCache(false); usageSnapshot.reset(); serviceSnapshot.reset()
+    void load()
+  }, Math.min(...boundaries) - now + 25)
+}
+function revalidateVisible() {
+  if (document.visibilityState !== 'visible' || !service.value) return
+  const old = latestUsage.value
+  if (old && (usageNaturalRange(usagePeriod.value, Date.now()).dayStart > Date.parse(old.generated_at)
+    || (old.summary.next_reset_at && Date.parse(old.summary.next_reset_at) <= Date.now()))) {
+    clearServiceCache(false); usageSnapshot.reset(); serviceSnapshot.reset(); void load()
+  }
+}
+if (typeof document !== 'undefined') document.addEventListener('visibilitychange', revalidateVisible)
+onScopeDispose(() => { clearTimeout(boundaryTimer); if (typeof document !== 'undefined') document.removeEventListener('visibilitychange', revalidateVisible) })
 async function load() {
   const owner = identity.value
   // 刷新下载权限时，交付组件自行重新核验；统计与软件选择保留。
@@ -71,19 +145,28 @@ async function load() {
     return
   }
   // 别名映射后只按正式服务编号读取用量，概览与用量分区共享这一份结果。
+  canonicalId.value = detail.id
+  restoring = true
+  usagePeriod.value = usageNavigation.get(owner, detail.id)
+  restoring = false
+  scheduleBoundary()
   const usage = await loadUsage()
   if (usage && owner === identity.value && !catalogSnapshot.error.value) lastReadAt.value = new Date().toISOString()
 }
-watch(usagePeriod, () => { if (service.value) void loadUsage() })
+watch(usagePeriod, value => {
+  if (service.value && !restoring) { usageNavigation.set(identity.value, service.value.id, value); void loadUsage() }
+}, { flush: 'sync' })
 watch(() => [route.params.id, identity.value], () => {
-  serviceSnapshot.reset(); usageSnapshot.reset(); catalogSnapshot.reset(); lastReadAt.value = null
+  clearTimeout(boundaryTimer)
+  rejectedBoundary = false; boundaryRetryUsed = false; boundaryError.value = ''
+  serviceSnapshot.reset(); usageSnapshot.reset(); catalogSnapshot.reset(); latestUsage.value = null; canonicalId.value = null; lastReadAt.value = null
   device.value = ''; os.value = ''; clientId.value = ''; activeSection.value = 'overview'; usagePeriod.value = '7d'
   if (auth.session?.authenticated) void load()
 }, { immediate: true, flush: 'sync' })
 </script>
 <template>
   <RouterLink to="/services" class="back-link">← 我的服务</RouterLink>
-  <div class="page-title"><div><p class="eyebrow">服务详情</p><h1>神舟云 <span class="short-id">#{{ String(service?.id || route.params.id).slice(0, 8) }}</span></h1></div><RefreshControl :loading="busy" :error="updateError" :last-read-at="lastReadAt" @refresh="load" /></div>
+  <div class="page-title"><div><p class="eyebrow">服务详情</p><h1>{{ service?.name || '神舟云' }}</h1></div><RefreshControl :loading="busy" :error="updateError" :last-read-at="lastReadAt" @refresh="load" /></div>
   <el-alert v-if="error" :title="error" type="error" show-icon :closable="false" class="spaced" />
   <el-skeleton v-if="busy && !service" :rows="6" animated />
   <template v-if="service">
@@ -94,7 +177,7 @@ watch(() => [route.params.id, identity.value], () => {
     <div class="service-actions"><button class="surface" @click="activeSection = 'connect'"><strong>连接设置 →</strong><span>选择设备和软件，按步骤导入订阅。</span></button><button class="surface" @click="activeSection = 'usage'"><strong>查看流量用量 →</strong><span>按近7天、本月或今年查看套餐消耗。</span></button></div>
     </el-tab-pane>
     <el-tab-pane label="流量用量" name="usage" lazy>
-    <UsageOverview :key="service.id" :service-id="service.id" :refresh-key="refreshKey" managed :snapshot="usageSnapshot.data.value" :loading="usageSnapshot.busy.value" :load-error="usageSnapshot.error.value" @period-change="usagePeriod = $event" />
+    <UsageOverview :key="service.id" :service-id="service.id" :refresh-key="refreshKey" managed :selected-period="usagePeriod" :snapshot="usageSnapshot.data.value" :loading="usageSnapshot.busy.value" :load-error="usageSnapshot.error.value" @period-change="usagePeriod = $event" />
     </el-tab-pane>
     <el-tab-pane label="连接设置" name="connect" lazy>
     <section class="surface setup-panel"><div class="section-title"><div><h2>{{ selected && !choosing ? selected.name + ' 连接设置' : '选择设备和软件' }}</h2><p class="muted small">更换软件沿用这份服务，无需重新选择线路。</p></div><el-button v-if="selected && !choosing" @click="choosing = true">更换设备或软件</el-button></div>
@@ -129,5 +212,9 @@ watch(() => [route.params.id, identity.value], () => {
 .service-actions strong { color: var(--el-color-primary); font-size: 18px; margin-bottom: 9px; }
 .service-actions span { color: var(--muted, #687887); font-size: 14px; }
 .service-actions button:hover { border-color: var(--el-color-primary); }
-@media(max-width: 640px) { .service-actions { grid-template-columns: 1fr; } }
+@media(max-width: 640px) {
+  .service-actions { grid-template-columns: 1fr; }
+  .page-title { flex-direction: column; align-items: flex-start; gap: 14px; }
+  .page-title h1 { white-space: nowrap; }
+}
 </style>
