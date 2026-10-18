@@ -299,7 +299,8 @@ class CoreReleaseExecutorTests(unittest.TestCase):
 
     def test_unverified_windows_private_permissions_fail_closed(self):
         self.executor.private_path_guard = __import__('bridge.core_release_executor', fromlist=['_private'])._private
-        with patch('bridge.core_release_executor.os.name', 'nt'):
+        # 仅替换被测模块的系统视图，不能改变pathlib的全局平台选择。
+        with patch('bridge.core_release_executor.os', SimpleNamespace(**{**vars(os), 'name': 'nt'})):
             self.assert_rejected('private_permissions_unverified')
 
     def test_lock_excludes_second_executor(self):
