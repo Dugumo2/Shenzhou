@@ -43,7 +43,7 @@ async function shot(page: Page, info: TestInfo, checkpoint: string) {
   writeFileSync(join(run, path), bytes)
   checkpoints.push({ checkpoint, path, sha256: hash(bytes) })
   // bootstrap 只留待审证据；正常门禁必须使用主代理手审接收的基线。
-  await info.attach(checkpoint, { body: bytes, contentType: 'image/png' })
+  await info.attach(checkpoint, { path: join(run, path), contentType: 'image/png' })
   if (process.env.ACCEPTANCE_BOOTSTRAP !== '1') {
     const name = `M1-${checkpoint}.png`
     if (!existsSync(info.snapshotPath(name))) throw new Error(`缺少已审视觉基线：${info.snapshotPath(name)}`)
