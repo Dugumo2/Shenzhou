@@ -178,11 +178,15 @@ class ReleaseAcceptanceTests(unittest.TestCase):
 
     def test_fixture_environment_journey_and_network_required(self):
         original = deepcopy(self.report)
+        network_scenarios = {s['id'] for s in self.contract['required_scenarios']
+                             if 'network-log' in s['evidence_types']}
+        self.assertTrue(network_scenarios)
         mutations = [lambda r: r['fixture'].update(sha256='0' * 64),
                      lambda r: r['environment'].update(application='vite-dev'),
                      lambda r: r['environment'].update(base_url='https://example.com'),
                      lambda r: r['journey'].update(scenario_ids=[]),
-                     lambda r: r['results'][-1].pop('network_log')]
+                     lambda r: next(row for row in r['results']
+                                    if row['scenario_id'] in network_scenarios).pop('network_log')]
         for index, mutate in enumerate(mutations):
             with self.subTest(case=index):
                 self.report = deepcopy(original)
