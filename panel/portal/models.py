@@ -902,3 +902,6 @@ class P8EntitlementBinding(models.Model):
 
 # 规则组合使用独立模块；与资源观测迁移分离，统一由portal注册。
 from .rule_policy_models import RulePolicy, RulePolicyVersion, RulePolicyBinding, RulePolicyCandidate
+from .core_control_models import CoreConfigCandidate, CoreControlJob, CoreControlState
+from .resource_plan_models import ResourcePlanBinding, ResourcePlanVersion, ResourcePlanConsumption
+from .agent_receiver_models import AgentRegistration

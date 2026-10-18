@@ -89,6 +89,12 @@ FRONTEND_MANIFEST_SHA256 = os.environ.get('PANEL_FRONTEND_MANIFEST_SHA256', '')
 FRONTEND_COMPAT_RELEASES = os.environ.get('PANEL_FRONTEND_COMPAT_RELEASES', '[]')
 # 元数据编辑不触碰运行配置；生产须单独启用这一能力。
 INVENTORY_METADATA_WRITE_ENABLED = os.environ.get('PANEL_INVENTORY_METADATA_WRITE_ENABLED', '0' if PANEL_LIVE else '1') == '1'
+# 核心执行、采购保存和Agent接收各自显式启用，不继承资料写权限。
+CORE_CONTROL_WRITE_ENABLED = os.environ.get('PANEL_CORE_CONTROL_WRITE_ENABLED') == '1'
+RESOURCE_PLAN_WRITE_ENABLED = os.environ.get('PANEL_RESOURCE_PLAN_WRITE_ENABLED') == '1'
+from portal.resource_plan_source import read_resource_plan_source
+RESOURCE_PLAN_SOURCE_READER = read_resource_plan_source
+AGENT_RECEIVER_ENABLED = os.environ.get('PANEL_AGENT_RECEIVER_ENABLED') == '1'
 CANDIDATE_DEMO_DATA = not PANEL_LIVE and os.environ.get('PANEL_CANDIDATE_DEMO_DATA') == '1'
 # 旧P8来源由部署清单显式开启；仅元数据，不在环境中保存真实订阅URL或令牌。
 P8_COMPAT_ENABLED = os.environ.get('PANEL_P8_COMPAT_ENABLED') == '1'

@@ -200,6 +200,32 @@ class ResourceImportTests(TestCase):
             self.apply(payload)
         self.assertEqual(list(core.ingresses.values_list('pk', flat=True)), [self.ingress.pk])
 
+    def test_import_cannot_change_revision_of_active_core_job(self):
+        from .models import CoreConfigCandidate, CoreControlJob
+        core = CoreInstance.objects.create(server=self.server, name='活动核心', core_type='xray',
+            instance_key='busy', configuration_owner='existing-owner')
+        candidate = CoreConfigCandidate.objects.create(core=core, base_revision=1,
+            patch={'log': {'level': 'info'}}, base_sha256='a'*64, candidate_sha256='b'*64,
+            binding_fingerprint='c'*64, artifact_ref='d'*32, creator=self.admin,
+            idempotency_key='candidate-import', request_sha256='e'*64)
+        job = CoreControlJob.objects.create(core=core, candidate=candidate, actor=self.admin,
+            action='apply', status='queued', expected_revision=1, fence=1,
+            idempotency_key='job-import', request_sha256='f'*64,
+            expires_at=timezone.now()+timedelta(minutes=5))
+        payload = self.manifest([{'kind': 'core', 'source_id': 'busy', 'target_pk': core.pk,
+            'expected_revision': 1, 'data': {'registered_version': '1.14.1'}}])
+        for state in ('queued', 'running', 'unknown'):
+            job.status=state; job.save(update_fields=['status'])
+            with self.assertRaisesMessage(ResourceImportError, 'core_busy'):
+                self.apply(payload)
+            core.refresh_from_db()
+            self.assertEqual(core.revision, 1)
+            self.assertFalse(ResourceImportReceipt.objects.exists())
+        job.status='failed'; job.save(update_fields=['status'])
+        self.apply(payload)
+        core.refresh_from_db()
+        self.assertEqual(core.revision, 2)
+
     def test_explicit_binding_cannot_be_stolen_by_another_source(self):
         self.apply(self.manifest())
         self.server.refresh_from_db()

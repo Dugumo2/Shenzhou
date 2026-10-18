@@ -424,6 +424,12 @@ def apply_resources(actor, payload, *, expected_preview_sha256, now=None):
                     obj.full_clean()
                     obj.save()
                 else:
+                    if kind == 'core':
+                        locked = _models()[kind].objects.select_for_update().get(pk=obj.pk)
+                        if locked.revision != obj.revision:
+                            raise ResourceImportError('target_revision_conflict')
+                        if locked.control_jobs.filter(status__in=('queued', 'running', 'unknown')).exists():
+                            raise ResourceImportError('core_busy')
                     # 即使只有绑定变化，也递增修订使旧预览明确失效。
                     previous_revision = obj.revision
                     for field, value in changes.items():

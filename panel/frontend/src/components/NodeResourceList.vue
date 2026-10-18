@@ -1,13 +1,20 @@
 <script setup lang="ts">
-import type { NodeResource } from '../inventoryTypes'
+import { ref, watch } from 'vue'
+import type { NodeResource, ResourceMetadata } from '../inventoryTypes'
 import NodeResourceDetails from './NodeResourceDetails.vue'
-defineProps<{ nodes: NodeResource[] }>()
+import ResourceMetadataEditor from './ResourceMetadataEditor.vue'
+const props = withDefaults(defineProps<{ nodes: NodeResource[]; metadataEditable?: boolean }>(), { metadataEditable: false })
+const emit = defineEmits<{ saved: [item: ResourceMetadata] }>()
+const showMetadata = ref(false)
+// 权限刷新为只读后保留已挂载表单和未确认请求，只关闭继续写入能力。
+watch(() => props.metadataEditable, enabled => { if (enabled) showMetadata.value = true }, { immediate: true })
 </script>
 <template>
   <section class="node-resource-list" aria-label="节点与外部资源">
     <details v-for="node in nodes" :key="node.id" class="node-entry">
       <summary><strong>{{ node.name }}</strong><span>{{ node.external_kind === 'subscription' ? '上游订阅来源' : node.kind === 'external' ? '外部节点' : node.kind === 'unknown' ? '归属待核实' : '自有资源' }} · {{ node.protocol_label }}</span></summary>
       <NodeResourceDetails :node="node" />
+      <ResourceMetadataEditor v-if="showMetadata" :item="{ id: node.resource_id, name: node.name, revision: node.revision }" :kind="node.resource_type === 'ingress' ? 'ingresses' : 'egresses'" :enabled="metadataEditable" @saved="emit('saved', { ...$event, id: node.id })" />
     </details>
     <p v-if="!nodes.length" role="status">尚无已核实的节点资料，请先完成资源盘点并关联实际核心与端点。</p>
   </section>

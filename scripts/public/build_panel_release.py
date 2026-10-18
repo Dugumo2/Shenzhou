@@ -22,7 +22,7 @@ def source_paths():
     panel=ROOT/'panel'
     fixed=['manage.py','requirements.txt','requirements-lock.txt']
     result=[panel/name for name in fixed]
-    for folder in ('megabox','portal','bridge'):
+    for folder in ('megabox','portal','bridge','agent'):
         for path in sorted((panel/folder).rglob('*')):
             relative=path.relative_to(panel)
             if path.is_symlink():raise ValueError('源码禁止符号链接')

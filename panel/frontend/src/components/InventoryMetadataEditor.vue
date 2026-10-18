@@ -26,7 +26,7 @@ async function save() {
       if (current !== generation) return
       result.item = data.server || data.line || result.item
     }
-    pending.value = null; revision.value = result.item.revision; name.value = result.item.name; notes.value = result.item.notes
+    pending.value = null; revision.value = result.item.revision; name.value = result.item.name; notes.value = result.item.notes || ''
     notice.value = result.message; emit('saved', result.item)
   } catch (e) {
     if (current !== generation) return

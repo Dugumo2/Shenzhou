@@ -157,11 +157,16 @@ def _state(prior):
     _time(prior['last_generated_at'], nullable=True)
     for key, value in prior['meters'].items():
         _need(type(key) is str and re.fullmatch(r'[a-z][a-z0-9_-]{0,47}', key)
-              and type(value) is dict and set(value) == STATE_KEYS, 'invalid_state')
+              and type(value) is dict and set(value) in (STATE_KEYS, STATE_KEYS | {'cycle_transition'}), 'invalid_state')
         for field in ('identity_fingerprint', 'plan_fingerprint'):
             _need(type(value[field]) is str and re.fullmatch(r'[0-9a-f]{64}', value[field]), 'invalid_state')
         if value['last_sample'] is not None:
             _validate_sample(value['last_sample'])
+        transition = value.get('cycle_transition')
+        if transition is not None:
+            _need(type(transition) is dict and set(transition) == {'starts_at', 'reset_at', 'base_index'}, 'invalid_state')
+            _need(_time(transition['starts_at']) < _time(transition['reset_at']) and type(transition['base_index']) is int
+                  and 0 <= transition['base_index'] <= 100000, 'invalid_state')
         index = value['cycle_index']
         _need(index is None or type(index) is int and 0 <= index <= 100000, 'invalid_state')
         baseline = value['baseline']
@@ -228,13 +233,27 @@ def _sample(source, home, now):
         return None, 'error', 'invalid_sample'
 
 
-def _cycle(plan, index):
+def _cycle(plan, index, state=None):
+    transition = (state or {}).get('cycle_transition')
+    if transition:
+        base = transition['base_index']
+        _need(index >= base, 'invalid_state')
+        start = (_time(transition['starts_at']) if index == base else
+                 _time(transition['reset_at']) + (index-base-1)*plan['cycle']['days']*86400)
+        end = _time(transition['reset_at']) if index == base else start+plan['cycle']['days']*86400
+        return {'kind': 'fixed_days', 'starts_at': _iso(start), 'ends_at': _iso(end), 'next_reset_at': _iso(end)}
     start = _time(plan['cycle']['anchor']) + index*plan['cycle']['days']*86400
     end = start + plan['cycle']['days']*86400
     return {'kind': 'fixed_days', 'starts_at': _iso(start), 'ends_at': _iso(end), 'next_reset_at': _iso(end)}
 
 
-def _index(plan, stamp):
+def _index(plan, stamp, state=None):
+    transition = (state or {}).get('cycle_transition')
+    if transition:
+        if stamp < _time(transition['starts_at']):
+            return -1
+        reset = _time(transition['reset_at'])
+        return transition['base_index'] if stamp < reset else transition['base_index']+1+math.floor((stamp-reset)/(plan['cycle']['days']*86400))
     return math.floor((stamp-_time(plan['cycle']['anchor']))/(plan['cycle']['days']*86400))
 
 
@@ -256,8 +275,8 @@ def _baseline(sample, zero=False):
 def _home_accept(state, sample, plan, now, alerts):
     prior = state['last_sample']
     observed = _time(sample['observed_at'])
-    index = _index(plan, observed)
-    expected = _index(plan, now)
+    index = _index(plan, observed, state)
+    expected = _index(plan, now, state)
     if index < 0:
         alerts.append('invalid_sample'); return False
     old_index = state['cycle_index']
@@ -275,7 +294,7 @@ def _home_accept(state, sample, plan, now, alerts):
         if not accepted:
             state['cycle_gap_codes'] = ['late_baseline']; alerts.append('late_baseline')
     elif index > old_index:
-        boundary = _time(_cycle(plan, index)['starts_at'])
+        boundary = _time(_cycle(plan, index, state)['starts_at'])
         timely = (index == old_index+1 and index == expected and observed-boundary <= BOUNDARY_GRACE
                   and prior is not None and _time(prior['observed_at']) >= boundary-HOME_TTL and not changed_epoch)
         state.update(cycle_index=index, baseline=_baseline(sample), carry_upload_bytes='0', carry_download_bytes='0',
@@ -351,10 +370,10 @@ def _meter(snapshot, plan, state, now, clock_back):
     quota, used, remaining, upload, download = None, None, None, None, None
     expected = None
     if home:
-        expected = _index(plan, now)
+        expected = _index(plan, now, state)
         index = state['cycle_index']
         active = index if index is not None else max(0, expected)
-        cycle = _cycle(plan, active)
+        cycle = _cycle(plan, active, state)
         quota = _bytes(plan['quota_bytes'], nullable=True)
         upload, download = _amounts(state)
         if upload is not None:
@@ -363,7 +382,7 @@ def _meter(snapshot, plan, state, now, clock_back):
             if quality == 'current': quality = 'gap'
             if not any(code in alerts for code in GAP_CODES): alerts.append('coverage_gap')
         if index is not None and expected > index:
-            boundary = _time(_cycle(plan, index)['ends_at'])
+            boundary = _time(_cycle(plan, index, state)['ends_at'])
             alerts.append('cycle_not_advanced' if now-boundary > BOUNDARY_GRACE else 'cycle_waiting')
             if quality in ('current', 'gap'): quality = 'stale'
         if expected < 0:
@@ -428,3 +447,26 @@ def project_resource_usage(snapshot, plans, prior_state=None, now=None):
         state['meters'][plan['id']] = item
     state['last_generated_at'] = _iso(max(now, old_time) if old_time is not None else now)
     return state, {'schema_version': 2, 'generated_at': _iso(now), 'meters': meters}
+
+
+def transition_resource_plan(prior_state, before, after, *, now):
+    """显式更改未来周期；当前期基线和累计完全保留，禁止静默换身份。"""
+    state = _state(prior_state)
+    old_identity, old_fingerprint = _plan(before)
+    identity, fingerprint = _plan(after)
+    _need(before['id'] == after['id'], 'plan_identity_changed')
+    item = state['meters'].get(before['id'])
+    _need(item is not None and item['identity_fingerprint'] == old_identity
+          and item['plan_fingerprint'] == old_fingerprint, 'plan_state_conflict')
+    if before['cycle'] != after['cycle']:
+        _need(before['source'] == after['source'] == 'residential' and before['scope'] == after['scope'], 'plan_identity_changed')
+        reset = _time(after['cycle']['anchor'])
+        index = item['cycle_index']
+        _need(index is not None and reset > now and item['last_sample'] is not None, 'cycle_transition_unavailable')
+        _need(_time(item['last_sample']['observed_at']) < reset and _index(before, now, item) == index, 'cycle_transition_stale')
+        current = _cycle(before, index, item)
+        item['cycle_transition'] = {'starts_at': current['starts_at'], 'reset_at': _iso(reset), 'base_index': index}
+    else:
+        _need(identity == old_identity, 'plan_identity_changed')
+    item.update(identity_fingerprint=identity, plan_fingerprint=fingerprint)
+    return state

@@ -2,8 +2,10 @@ from django.conf import settings
 from django.urls import include, path
 from portal.frontend import workspace, workspace_root, workspace_configured
 from portal.frontend_release import release_version
+from portal.agent_receiver import agent_events
 
 urlpatterns = [
+    path('api/agent/v1/events/', agent_events, name='agent_events'),
     path('api/v1/', include('portal.api_urls')),
     path('api/v1/', include('portal.billing_urls')),
     path('app/', workspace, name='workspace'),

@@ -2,6 +2,7 @@
 import { computed, ref, onMounted, onBeforeUnmount } from 'vue'
 import type { NodeResource } from '../inventoryTypes'
 import ResourceUsageCard from './ResourceUsageCard.vue'
+import ResourcePlanEditor from './ResourcePlanEditor.vue'
 
 const props = defineProps<{ node: NodeResource }>()
 const now = ref(Date.now())
@@ -26,6 +27,7 @@ const cycleLabel = computed(() => {
     <template v-if="node.purchase_meter">
       <p class="purchase-cycle">{{ cycleLabel }} · 采购账期独立于用户套餐</p>
       <ResourceUsageCard :meter="node.purchase_meter" :now="now" />
+      <ResourcePlanEditor v-if="node.purchase_binding_key" :binding-key="node.purchase_binding_key" :enabled="node.purchase_plan_editable === true" />
       <p class="purchase-note">采购用量不分摊给用户，续费或替换资源不会重置用户套餐用量与有效期。</p>
     </template>
     <p v-else role="status">{{ node.purchase_meter_id ? '采购统计暂不可读取，请检查已授权来源的采集记录。' : '尚未关联采购统计，请先核实资源与采购记录的对应关系。' }}</p>

@@ -84,7 +84,7 @@ def safe_relative(base, name):
 def source_identity(root=ROOT):
     """覆盖产品、夹具、测试与发行器的实际字节，包含未提交文件，排除运行产物。"""
     root = Path(root)
-    folders = ('panel/megabox', 'panel/portal', 'panel/bridge', 'panel/tests',
+    folders = ('panel/megabox', 'panel/portal', 'panel/bridge', 'panel/agent', 'panel/tests',
                'panel/frontend/src', 'panel/frontend/tests', 'panel/frontend/e2e',
                'panel/acceptance', 'scripts/public')
     paths = set()

@@ -113,7 +113,7 @@ test('详情正在刷新时保留同对象内容；成功后回填新样本',asy
 
 test('核心资料由真实CoreMetadata选中，刷新保选中并撤除已删除对象',async()=>{
   const coreSource=readFileSync(new URL('../src/components/ServerCoreDetails.vue',import.meta.url),'utf8'),exports:any={}
-  new Function('require','exports',compile(coreSource))((name:string)=>name==='vue'?vue:name==='../display'?display:undefined,exports)
+  new Function('require','exports',compile(coreSource))((name:string)=>name==='vue'?vue:name==='../display'?display:{default:{name:'NestedComponent'}},exports)
   const core={id:'core-test',name:'测试核心',core_type:'xray',instance_key:'test',registered_version:'test-version',configuration_owner:'test-owner',configuration_version:'rev-1',revision:1,notes:'',ingress_ids:['1'],association_valid:true,service_unit:'test.service',owner_state:'observed_only',evidence_source:'测试清单',evidence_observed_at:observation.observed_at}
   const props=vue.reactive({cores:{items:[core],truncated:false}}),scope=vue.effectScope()
   const state=scope.run(()=>exports.default.setup(props,{expose:()=>{}}))

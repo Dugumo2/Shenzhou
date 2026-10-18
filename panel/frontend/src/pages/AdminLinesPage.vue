@@ -100,6 +100,9 @@ function verificationLabel(line: LineInventory) {
   if (state === 'fresh') return ({ pass:'整链通过（有效期内）', fail:'整链失败', timeout:'整链超时', unknown:'结果未知' } as Record<string,string>)[value.result || 'unknown']
   return ({ stale:'检测已过期', target_changed:'路径已变化', unknown:'未知' } as Record<string,string>)[state] || '尚未检测'
 }
+function resourceMetadataSaved(item: ResourceMetadata) {
+  if (detail.value?.nodes) detail.value.nodes.items = detail.value.nodes.items.map(node => node.id === item.id ? { ...node, ...item } : node)
+}
 function metadataSaved(item: ResourceMetadata) {
   items.value = items.value.map(row => row.id === item.id ? { ...row, ...item } : row)
   if (selected.value?.id === item.id) selected.value = { ...selected.value, ...item }
@@ -151,7 +154,7 @@ onUnmounted(() => { generation++; listController?.abort(); closeDetail() })
         <div class="path-arrow" aria-hidden="true">↓</div>
         <section><h3>出口</h3><p><strong>{{ detail.line.egress.server.name }} / {{ detail.line.egress.name }}</strong></p><p class="small muted">{{ detail.line.egress.kind_label }} · {{ detail.line.egress.server.enabled ? '服务器登记启用' : '服务器登记停用' }}</p><p class="small muted">失败关闭登记：{{ detail.line.egress.fail_closed ? '已登记要求' : '未登记要求' }}；尚无实际整链验证证据。</p></section>
       </div>
-      <template v-if="detail.nodes"><h2 class="nodes-title">相关节点与外部资源</h2><NodeResourceList :nodes="detail.nodes.items" /><p v-if="detail.nodes.truncated" class="small muted">当前显示 {{ detail.nodes.items.length }} 个，共 {{ detail.nodes.total }} 个相关资源。</p></template>
+      <template v-if="detail.nodes"><h2 class="nodes-title">相关节点与外部资源</h2><NodeResourceList :nodes="detail.nodes.items" :metadata-editable="detail.capabilities.edit" @saved="resourceMetadataSaved" /><p v-if="detail.nodes.truncated" class="small muted">当前显示 {{ detail.nodes.items.length }} 个，共 {{ detail.nodes.total }} 个相关资源。</p></template>
       <dl class="inventory-facts"><div><dt>线路登记</dt><dd>{{ detail.line.enabled ? '登记启用' : '登记停用' }}</dd></div><div><dt>端点登记</dt><dd>{{ detail.line.endpoint_registration === 'enabled' ? '登记均启用' : '含停用登记' }}</dd></div><div><dt>TCP / UDP / DNS</dt><dd>按下方具体目标与检测范围核对</dd></div><div><dt>整链状态</dt><dd>{{ verificationLabel(detail.line) }}</dd></div></dl>
       <InventoryChecks :checks="detail.checks" :actions="detail.check_actions" @completed="selected && showDetail(selected)" />
       <p class="quality-note">住宅或住宅 DNS 失败须关闭路径；上游没有 UDP 能力时须拒绝该路径 UDP。目前登记信息不能证明这些行为已经生效。</p>

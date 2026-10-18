@@ -27,7 +27,7 @@ def unique(pairs):
     return result
 
 
-def protected_json(path,maximum=131072):
+def protected_json(path,maximum=131072,*,return_raw=False):
     require(not any(p.is_symlink() for p in (path,*path.parents)))
     info=path.stat()
     require(stat.S_ISREG(info.st_mode) and info.st_uid==0 and info.st_nlink==1
@@ -38,7 +38,8 @@ def protected_json(path,maximum=131072):
         raw=stream.read(maximum+1)
         after=os.fstat(stream.fileno())
     require((opened.st_size,opened.st_mtime_ns)==(after.st_size,after.st_mtime_ns) and len(raw)==info.st_size)
-    return json.loads(raw,object_pairs_hook=unique,parse_constant=lambda _:(_ for _ in ()).throw(ValueError()))
+    document=json.loads(raw,object_pairs_hook=unique,parse_constant=lambda _:(_ for _ in ()).throw(ValueError()))
+    return (document,raw) if return_raw else document
 
 
 def atomic_json(path,document,mode,gid):

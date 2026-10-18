@@ -12,6 +12,7 @@ import ServerInventoryCard from '../components/ServerInventoryCard.vue'
 import ServerCoreDetails from '../components/ServerCoreDetails.vue'
 import ServerObservationView from '../components/ServerObservationView.vue'
 import ResourceUsageCard from '../components/ResourceUsageCard.vue'
+import ResourcePlanEditor from '../components/ResourcePlanEditor.vue'
 import NodeResourceList from '../components/NodeResourceList.vue'
 import { useInventoryClock } from '../inventoryStatus'
 const observationClock = useInventoryClock()
@@ -114,6 +115,11 @@ function metadataSaved(item: ResourceMetadata) {
   if (selected.value?.id === item.id) selected.value = { ...selected.value, ...item }
   if (detail.value?.server.id === item.id) detail.value.server = { ...detail.value.server, ...item }
 }
+function resourceMetadataSaved(item: ResourceMetadata) {
+  if (!detail.value) return
+  detail.value.cores.items = detail.value.cores.items.map(core => core.id === item.id ? { ...core, ...item } : core)
+  if (detail.value.nodes) detail.value.nodes.items = detail.value.nodes.items.map(node => node.id === item.id ? { ...node, ...item } : node)
+}
 watch(() => route.query, query => {
   q.value = typeof query.q === 'string' ? query.q : ''
   status.value = typeof query.status === 'string' && statuses.some(item => item.id === query.status) ? query.status : 'all'
@@ -158,10 +164,10 @@ onUnmounted(() => { clearInterval(refreshTimer); generation++; listController?.a
         <dl class="inventory-facts"><div><dt>服务器编号</dt><dd>{{ detail.server.id }}</dd></div><div><dt>登记状态</dt><dd>{{ detail.server.enabled ? '登记启用' : '登记停用' }}</dd></div><div><dt>最后记录</dt><dd>{{ recordedAt(detail.server.last_seen_at) }}</dd></div><div><dt>适配器</dt><dd>{{ detail.server.adapter === 'unconfigured' ? '未配置' : detail.server.adapter }}</dd></div></dl>
         <InventoryMetadataEditor :key="detail.server.id" :item="detail.server" kind="servers" :enabled="detail.capabilities.edit" @saved="metadataSaved" />
       </section>
-      <div v-show="activeSection === 'cores'"><ServerCoreDetails :key="detail.server.id" :cores="detail.cores" /></div>
+      <div v-show="activeSection === 'cores'"><ServerCoreDetails :key="detail.server.id" :cores="detail.cores" :metadata-editable="detail.capabilities.edit" @saved="resourceMetadataSaved" /></div>
       <section v-show="activeSection === 'nodes'" aria-label="服务器节点">
         <div class="section-title"><h2>节点与端点</h2><RouterLink :to="{ path: '/admin/lines', query: { server_id: detail.server.id } }">查看关联线路 →</RouterLink></div>
-        <NodeResourceList v-if="detail.nodes" :nodes="detail.nodes.items" />
+        <NodeResourceList v-if="detail.nodes" :nodes="detail.nodes.items" :metadata-editable="detail.capabilities.edit" @saved="resourceMetadataSaved" />
         <p v-if="detail.nodes?.truncated" class="small muted">仅展示前 {{ detail.nodes.items.length }} 个节点，总数 {{ detail.nodes.total }}。</p>
         <details class="endpoint-register"><summary>原入口与出口登记</summary>
         <h3>入口（{{ detail.ingresses.total }}）</h3><ul v-if="detail.ingresses.items.length" class="endpoint-list"><li v-for="entry in detail.ingresses.items" :key="entry.id"><span>{{ entry.name }}</span><span class="small muted">{{ entry.protocol_label }} · {{ entry.enabled ? '登记启用' : '登记停用' }}</span></li></ul><p v-else class="muted">尚无入口登记。</p>
@@ -170,7 +176,7 @@ onUnmounted(() => { clearInterval(refreshTimer); generation++; listController?.a
         <p v-if="detail.egresses.truncated" class="small muted">仅展示前 {{ detail.egresses.items.length }} 个出口，总数 {{ detail.egresses.total }}。</p>
         </details>
       </section>
-      <section v-show="activeSection === 'usage'" aria-label="机器用量与有效期"><h2>用量与有效期</h2><p class="quality-note">此处分开展示机器采购用量和有效期；不与个人套餐相加，也不从网卡累计推导套餐账单。</p><ResourceUsageCard v-if="detail.purchase_meter" :meter="detail.purchase_meter" :now="observationClock" /><p v-else class="muted">机器采购用量尚未关联可用来源；额度、重置与到期暂不可确认。需将已核对的机器采购来源绑定至此服务器。</p></section>
+      <section v-show="activeSection === 'usage'" aria-label="机器用量与有效期"><h2>用量与有效期</h2><p class="quality-note">此处分开展示机器采购用量和有效期；不与个人套餐相加，也不从网卡累计推导套餐账单。</p><template v-if="detail.purchase_meter"><ResourceUsageCard :meter="detail.purchase_meter" :now="observationClock" /><ResourcePlanEditor v-if="detail.purchase_binding_key" :binding-key="detail.purchase_binding_key" :enabled="detail.purchase_plan_editable === true" @saved="refreshDetail" /></template><p v-else class="muted">机器采购用量尚未关联可用来源；额度、重置与到期暂不可确认。需将已核对的机器采购来源绑定至此服务器。</p></section>
       <section v-show="activeSection === 'checks'" aria-label="服务器检查记录"><InventoryChecks :checks="detail.checks" :actions="detail.check_actions || []" @completed="refreshDetail" /></section>
     </template>
   </el-drawer>

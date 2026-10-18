@@ -7,6 +7,7 @@ from urllib.parse import unquote, urlsplit
 
 ROOT = Path(__file__).resolve().parents[2]
 FIXED = {'.gitignore', 'README.md', 'panel/.gitignore', 'panel/README.md',
+         'panel/agent/__init__.py', 'panel/agent/outbox.py', 'panel/agent/transport.py', 'panel/agent/cli.py',
          'panel/manage.py', 'panel/requirements.txt', 'panel/requirements-dev.txt',
          'panel/requirements-metering.txt', 'panel/requirements-lock.txt',
          '.github/workflows/check.yml', 'panel/frontend/.gitignore',

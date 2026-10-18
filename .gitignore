@@ -23,6 +23,12 @@
 !/panel/portal/
 !/panel/megabox/
 !/panel/bridge/
+!/panel/agent/
+/panel/agent/*
+!/panel/agent/__init__.py
+!/panel/agent/outbox.py
+!/panel/agent/transport.py
+!/panel/agent/cli.py
 !/panel/tests/
 !/panel/acceptance/
 !/panel/deploy/

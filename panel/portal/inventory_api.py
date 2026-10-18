@@ -9,14 +9,24 @@ from django.db.models import Q
 from .api import endpoint, error, page_options, success
 from .api_helpers import iso
 from .models import CheckResult, CoreInstance, Egress, Ingress, Line, Server, ServerObservation
-from .inventory_service import InventoryError, edit_metadata, metadata_edit_enabled
+from .inventory_service import (InventoryError, METADATA_MODELS, edit_metadata, metadata_edit_enabled,
+                                metadata_identifier, metadata_projection)
 from .observation_ingest import ObservationError, check_projection, freshness, observation_projection, target_fingerprint
 from .inventory_purchase import InventoryPurchases
+from .resource_plan_service import resource_plan_write_enabled
 from .inventory_queries import (ENDPOINT_LIMIT, _servers_query, _cores_query, _ingresses_query,
     _egresses_query, _hydrate_egress_chains, _lines_query, _prepare_line_graphs, load_check_results)
 from .node_resources import project_ingress, project_egress
 from .line_projection import egress_chain_resources, line_path_projection
 from .resource_checks import actions_for_targets, enqueue_check, get_job
+
+
+def _purchased_node(row, purchases):
+    purchase = purchases.for_resource(row.purchase_meter_id, 'external_node')
+    node = project_egress(row, purchase['purchase_meter'])
+    node['purchase_binding_key'] = purchase['purchase_binding_key']
+    node['purchase_plan_editable'] = purchase['purchase_meter_state'] == 'ready' and resource_plan_write_enabled()
+    return node
 
 
 LIMITATIONS = [
@@ -130,7 +140,7 @@ def _patch(request, kind, identifier):
             raise ValueError()
         body = json.loads(request.body, object_pairs_hook=unique,
                           parse_constant=lambda _: (_ for _ in ()).throw(ValueError()))
-    except (ValueError, UnicodeError, RecursionError):
+    except (ValueError, UnicodeError, RecursionError, RequestDataTooBig):
         return error('invalid_json', '请求内容无效或超过大小限制。', 422)
     try:
         return success(edit_metadata(request.user, kind, identifier, body))
@@ -141,6 +151,36 @@ def _patch(request, kind, identifier):
 def _checks(query):
     rows = load_check_results(query.order_by('-observed_at', '-pk')[:101])
     return {'items': [check_projection(row) for row in rows[:100]], 'truncated': len(rows) > 100}
+
+
+def _metadata_detail(request, kind, identifier):
+    """最小资料接口不查询配置、身份、观测，也不触发运行控制。"""
+    try:
+        lookup = metadata_identifier(kind, identifier)
+    except InventoryError as exc:
+        return error(exc.code, exc.message, exc.status)
+    if request.method == 'PATCH':
+        return _patch(request, kind, identifier)
+    item = METADATA_MODELS[kind].objects.filter(**lookup).first()
+    if item is None:
+        return error('not_found', '资源不存在或不可访问。', 404)
+    return success({'item': metadata_projection(kind, item), 'read_only': not metadata_edit_enabled(),
+                    'capabilities': {'edit': metadata_edit_enabled()}})
+
+
+@endpoint(methods=('GET', 'PATCH'), staff=True)
+def core_detail(request, public_id):
+    return _metadata_detail(request, 'core', public_id)
+
+
+@endpoint(methods=('GET', 'PATCH'), staff=True)
+def ingress_detail(request, resource_id):
+    return _metadata_detail(request, 'ingress', resource_id)
+
+
+@endpoint(methods=('GET', 'PATCH'), staff=True)
+def egress_detail(request, resource_id):
+    return _metadata_detail(request, 'egress', resource_id)
 
 
 @endpoint(methods=('GET', 'PATCH'), staff=True)
@@ -160,7 +200,7 @@ def server_detail(request, public_id):
     egress_rows = list(_egresses_query().filter(server=server)[:ENDPOINT_LIMIT])
     _hydrate_egress_chains(egress_rows)
     nodes = [project_ingress(row) for row in ingress_rows]
-    nodes.extend(project_egress(row, purchases.for_resource(row.purchase_meter_id, 'external_node')['purchase_meter']) for row in egress_rows)
+    nodes.extend(_purchased_node(row, purchases) for row in egress_rows)
     cores = list(_cores_query().filter(server=server).order_by('pk')[:101])
     core_items = [{'id': str(core.public_id), 'name': core.name, 'instance_key': core.instance_key,
                    'core_type': core.core_type, 'registered_version': core.registered_version,
@@ -174,6 +214,7 @@ def server_detail(request, public_id):
                                   + [('ingress', row) for row in ingress_rows] + [('egress', row) for row in egress_rows])
     return success({'server': _server_projection(server), 'read_only': not metadata_edit_enabled(),
                     **purchases.for_resource(server.purchase_meter_id, 'server'),
+                    'purchase_plan_editable': resource_plan_write_enabled(),
                     'nodes': {'items': nodes, 'total': server.ingress_count + server.egress_count,
                               'truncated': server.ingress_count + server.egress_count > len(nodes)},
                     'check_actions': actions,
@@ -257,7 +298,7 @@ def line_detail(request, public_id):
     ingress_rows = list(unique.values())[:ENDPOINT_LIMIT]
     nodes = [project_ingress(row) for row in ingress_rows]
     chain, chain_issues = egress_chain_resources(line.egress)
-    nodes.extend(project_egress(row, purchases.for_resource(row.purchase_meter_id, 'external_node')['purchase_meter']) for row in chain)
+    nodes.extend(_purchased_node(row, purchases) for row in chain)
     projected = _line_projection(line)
     line.registered_additional_ingresses = complete_ingresses
     line.registered_additional_ingresses_complete = True

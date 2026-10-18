@@ -4,7 +4,7 @@ import type { ResourceUsageMeter } from './providerUsage'
 export interface RegisteredServer { id: string; name: string; enabled: boolean }
 export type Freshness = 'fresh' | 'stale' | 'target_changed' | 'unknown'
 export type PurchaseMeterState = 'unbound' | 'ready' | 'unavailable' | 'forbidden'
-export interface ResourceMetadata { id: string; name: string; notes: string; revision: number }
+export interface ResourceMetadata { id: string; name: string; notes?: string; revision: number }
 export interface Observation {
   source: string; observed_at: string; expires_at: string; freshness: Freshness; scope: string
   rate_state?: 'unavailable' | 'valid' | 'stale' | 'generation_changed' | 'counter_reset' | 'gap' | 'scope_changed'
@@ -59,6 +59,7 @@ export interface ServerInventoryDetail {
   egresses: { items: RegisteredEgress[]; total: number; truncated: boolean }
   purchase_meter?: ResourceUsageMeter | null; nodes?: NodeResourcePage; check_actions?: InventoryCheckAction[]
   purchase_meter_state?: PurchaseMeterState; purchase_binding_key?: string | null
+  purchase_plan_editable?: boolean
   capabilities: { edit: boolean; probe: boolean; manage_cores: false }; limitations: string[]
 }
 export interface LineInventory {
@@ -87,6 +88,7 @@ export interface NodeResource {
   core_refs: { state: 'unknown' | 'conflict' | 'linked'; items: { id: string; name: string; core_type: string; owner_state: CoreOwnerState }[] }
   external_kind: 'node' | 'subscription' | null; evidence: { source: string | null; observed_at: string | null }
   purchase_meter: ResourceUsageMeter | null; purchase_meter_id: string | null
+  purchase_binding_key?: string | null; purchase_plan_editable?: boolean
   capabilities: { manage_core: false; install_agent: false; grant: false; sync_source: false }; limitations: string[]
 }
 export interface LinePathPoint { id: string; name: string; kind: 'ingress' | 'egress' | 'core' | 'unknown' }

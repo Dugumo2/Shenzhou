@@ -620,10 +620,22 @@
     {
       "id": "CP12-usage-loading-cache",
       "title": "流量首次加载、范围缓存及失效边界",
-      "requirements": ["R03", "R04", "R08", "R25", "R33"],
+      "requirements": [
+        "R03",
+        "R04",
+        "R08",
+        "R25",
+        "R33"
+      ],
       "entry_path": "/services/:id",
-      "roles": ["admin", "user"],
-      "viewports": ["desktop", "mobile"],
+      "roles": [
+        "admin",
+        "user"
+      ],
+      "viewports": [
+        "desktop",
+        "mobile"
+      ],
       "assertions": [
         {
           "id": "CP12-A01",
@@ -654,7 +666,11 @@
           "description": "以Asia/Shanghai跨日、跨月、跨年及每月20日00:00重置边界推进浏览器时间，验证旧自然范围/账期缓存失效并发起范围与摘要校验；页面实际验证TTL过期，容量淘汰另关联同源码缓存模块测试证据，不冒充浏览器已覆盖容量。前端边界证据不冒充后端重置、记账或C0现场通过。"
         }
       ],
-      "evidence_types": ["assertion-report", "screenshot", "network-log"],
+      "evidence_types": [
+        "assertion-report",
+        "screenshot",
+        "network-log"
+      ],
       "source_refs": [
         "panel/frontend/src/pages/ServicePage.vue",
         "panel/frontend/src/components/UsageOverview.vue",
@@ -663,16 +679,34 @@
         "panel/frontend/src/useSnapshotRequest.ts",
         "panel/frontend/src/useSessionIdentity.ts"
       ],
-      "screenshot_checkpoints": ["usage-loading-7d", "usage-loading-month", "usage-loading-year", "usage-cache-pending", "usage-cache-failed", "boundary-revalidated"],
+      "screenshot_checkpoints": [
+        "usage-loading-7d",
+        "usage-loading-month",
+        "usage-loading-year",
+        "usage-cache-pending",
+        "usage-cache-failed",
+        "boundary-revalidated"
+      ],
       "delivery_state": "required_fix"
     },
     {
       "id": "CP13-usage-chart-interaction",
       "title": "柱图悬浮、键盘及触屏读数",
-      "requirements": ["R03", "R04", "R08", "R10", "R25"],
+      "requirements": [
+        "R03",
+        "R04",
+        "R08",
+        "R10",
+        "R25"
+      ],
       "entry_path": "/services/:id",
-      "roles": ["user"],
-      "viewports": ["desktop", "mobile"],
+      "roles": [
+        "user"
+      ],
+      "viewports": [
+        "desktop",
+        "mobile"
+      ],
       "assertions": [
         {
           "id": "CP13-A01",
@@ -695,22 +729,42 @@
           "description": "1440px与390px上操作首尾及中间桶、滚动与切指标后，卡片和高亮可见、文字可读，不越出视口或遮住必要操作；原线路明细和7d/month/year入口保留。"
         }
       ],
-      "evidence_types": ["assertion-report", "screenshot"],
+      "evidence_types": [
+        "assertion-report",
+        "screenshot"
+      ],
       "source_refs": [
         "panel/frontend/src/components/UsageTimeline.vue",
         "panel/frontend/src/usageTimeseries.ts",
         "panel/frontend/src/components/UsageDashboard.vue"
       ],
-      "screenshot_checkpoints": ["usage-card-hover", "usage-card-focus", "usage-card-touch"],
+      "screenshot_checkpoints": [
+        "usage-card-hover",
+        "usage-card-focus",
+        "usage-card-touch"
+      ],
       "delivery_state": "required_fix"
     },
     {
       "id": "CP14-service-status-diagnostics",
       "title": "服务业务状态、管理员诊断及编号资料",
-      "requirements": ["R03", "R04", "R08", "R13", "R24", "R33"],
+      "requirements": [
+        "R03",
+        "R04",
+        "R08",
+        "R13",
+        "R24",
+        "R33"
+      ],
       "entry_path": "/services",
-      "roles": ["admin", "user"],
-      "viewports": ["desktop", "mobile"],
+      "roles": [
+        "admin",
+        "user"
+      ],
+      "viewports": [
+        "desktop",
+        "mobile"
+      ],
       "assertions": [
         {
           "id": "CP14-A01",
@@ -733,7 +787,11 @@
           "description": "精简诊断及拆分状态前后，额度/已用/剩余/到期、圆环/raw/三范围图、一次衔接和原始字节事实保持；管理员仍能核对原quality与覆盖信息，不改账、抬高quality、放宽可靠标头或删除C0未完成边界来通过验收。"
         }
       ],
-      "evidence_types": ["assertion-report", "screenshot", "network-log"],
+      "evidence_types": [
+        "assertion-report",
+        "screenshot",
+        "network-log"
+      ],
       "source_refs": [
         "panel/portal/api_helpers.py",
         "panel/portal/usage_api.py",
@@ -741,8 +799,132 @@
         "panel/frontend/src/pages/ServicePage.vue",
         "panel/frontend/src/components/ServiceMetrics.vue"
       ],
-      "screenshot_checkpoints": ["service-business-state", "service-identifiers", "admin-metering-diagnostics"],
+      "screenshot_checkpoints": [
+        "service-business-state",
+        "service-identifiers",
+        "admin-metering-diagnostics"
+      ],
       "delivery_state": "required_fix"
+    },
+    {
+      "id": "M1-01",
+      "title": "节点资料保存、并发409保输入、重入保留",
+      "requirements": [
+        "R21",
+        "R24"
+      ],
+      "roles": [
+        "admin"
+      ],
+      "viewports": [
+        "desktop",
+        "mobile"
+      ],
+      "assertions": [
+        {
+          "id": "M1A01",
+          "description": "节点资料保存、并发409保输入、重入保留；清理后原套餐、身份和资源保护摘要保持"
+        }
+      ],
+      "screenshot_checkpoints": [
+        "metadata-saving",
+        "metadata-conflict",
+        "metadata-reentered"
+      ],
+      "evidence_types": [
+        "screenshots",
+        "browser-interaction"
+      ]
+    },
+    {
+      "id": "M1-02",
+      "title": "真实候选服务检查失败与UNKNOWN只读恢复且不重放",
+      "requirements": [
+        "R23",
+        "R24"
+      ],
+      "roles": [
+        "admin"
+      ],
+      "viewports": [
+        "desktop",
+        "mobile"
+      ],
+      "assertions": [
+        {
+          "id": "M1A02",
+          "description": "真实候选服务检查失败与UNKNOWN只读恢复且不重放；清理后原套餐、身份和资源保护摘要保持"
+        }
+      ],
+      "screenshot_checkpoints": [
+        "core-check-pending",
+        "core-check-failed",
+        "core-unknown",
+        "core-reconciled"
+      ],
+      "evidence_types": [
+        "screenshots",
+        "browser-interaction"
+      ]
+    },
+    {
+      "id": "M1-03",
+      "title": "采购版本真实消费、并发冲突、拒绝恢复与有效周期保持",
+      "requirements": [
+        "R25",
+        "R26"
+      ],
+      "roles": [
+        "admin"
+      ],
+      "viewports": [
+        "desktop",
+        "mobile"
+      ],
+      "assertions": [
+        {
+          "id": "M1A03",
+          "description": "采购版本真实消费、并发冲突、拒绝恢复与有效周期保持；清理后原套餐、身份和资源保护摘要保持"
+        }
+      ],
+      "screenshot_checkpoints": [
+        "purchase-saving",
+        "purchase-conflict-preserved",
+        "purchase-consumed-reentered"
+      ],
+      "evidence_types": [
+        "screenshots",
+        "browser-interaction"
+      ]
+    },
+    {
+      "id": "M1-04",
+      "title": "资料响应丢失原键重试及撤权拒写",
+      "requirements": [
+        "R21",
+        "R24"
+      ],
+      "roles": [
+        "admin"
+      ],
+      "viewports": [
+        "desktop",
+        "mobile"
+      ],
+      "assertions": [
+        {
+          "id": "M1A04",
+          "description": "资料响应丢失原键重试及撤权拒写；清理后原套餐、身份和资源保护摘要保持"
+        }
+      ],
+      "screenshot_checkpoints": [
+        "metadata-replayed",
+        "metadata-permission-revoked"
+      ],
+      "evidence_types": [
+        "screenshots",
+        "browser-interaction"
+      ]
     }
   ],
   "delivered_scope": [

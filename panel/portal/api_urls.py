@@ -8,6 +8,7 @@ from . import inventory_api, rule_source_api
 from . import p8_compat_api
 from . import observation_api
 from . import rule_policy_api
+from . import core_control_api, resource_plan_api
 
 
 app_name = 'api'
@@ -46,6 +47,18 @@ urlpatterns = [
     path('admin/rule-policies/<uuid:policy_id>/compile', rule_policy_api.compile, name='rule_policy_compile'),
     path('admin/rule-policies/<uuid:policy_id>/candidates/<uuid:candidate_id>', rule_policy_api.candidate, name='rule_policy_candidate'),
     path('admin/servers', inventory_api.servers, name='inventory_servers'),
+    path('admin/cores/<str:public_id>', inventory_api.core_detail, name='inventory_core_detail'),
+    path('admin/ingresses/<str:resource_id>', inventory_api.ingress_detail, name='inventory_ingress_detail'),
+    path('admin/egresses/<str:resource_id>', inventory_api.egress_detail, name='inventory_egress_detail'),
+    path('admin/cores/<str:core_id>/control', core_control_api.core_control_detail, name='core_control_detail'),
+    path('admin/cores/<str:core_id>/control/candidates', core_control_api.core_candidate_create, name='core_candidate_create'),
+    path('admin/cores/<str:core_id>/control/candidates/<str:candidate_id>/check', core_control_api.core_candidate_check, name='core_candidate_check'),
+    path('admin/cores/<str:core_id>/control/candidates/<str:candidate_id>/apply', core_control_api.core_candidate_apply, name='core_candidate_apply'),
+    path('admin/cores/<str:core_id>/control/candidates/<str:candidate_id>/rollback', core_control_api.core_candidate_rollback, name='core_candidate_rollback'),
+    path('admin/cores/<str:core_id>/control/jobs/<str:job_id>', core_control_api.core_job_detail, name='core_job_detail'),
+    path('admin/resource-plans/<str:binding_key>', resource_plan_api.resource_plan, name='resource_plan'),
+    path('admin/resource-plans/<str:binding_key>/preview', resource_plan_api.preview, name='resource_plan_preview'),
+    path('admin/resource-plans/<str:binding_key>/confirm', resource_plan_api.confirm, name='resource_plan_confirm'),
     path('admin/resource-checks', inventory_api.resource_check_create, name='inventory_check_create'),
     path('admin/resource-checks/<str:public_id>', inventory_api.resource_check_detail, name='inventory_check_detail'),
     path('admin/servers/<str:public_id>', inventory_api.server_detail, name='inventory_server_detail'),

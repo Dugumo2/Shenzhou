@@ -28,6 +28,7 @@ def main():
     parser.add_argument('--bootstrap',action='store_true',help='只生成待主审截图，报告不能通过')
     parser.add_argument('--grep',help='开发定位；缺少场景的结果始终失败')
     parser.add_argument('--old-release',type=Path,help='已审核历史前端目录；仅读取构建资源')
+    parser.add_argument('--m1', action='store_true', help='使用M1扩展隔离夹具，新增场景仍须独立人工审图')
     args=parser.parse_args()
     candidate=args.candidate.resolve()
     from release_acceptance import validate_archive
@@ -73,7 +74,9 @@ def main():
         releases['old']={'root':str(old),'manifest_sha256':digest(old/'frontend-manifest.json'),'kind':'synthetic-previous-compiled-assets'}
     (run/'releases.json').write_text(json.dumps(releases),encoding='utf-8')
     (run/'release-state.json').write_text('{"active":"candidate"}',encoding='utf-8')
-    fixture=ROOT/'panel/frontend/e2e/fixture_runtime.py'
+    planned=json.loads((ROOT/'panel/acceptance/critical-paths.json').read_text(encoding='utf-8'))['required_scenarios']
+    use_m1=args.m1 or any(row['id'].startswith('M1-') for row in planned)
+    fixture=ROOT/'panel/frontend/e2e'/('core_resource_fixture.py' if use_m1 else 'fixture_runtime.py')
     subprocess.run([sys.executable,str(fixture),'seed','--run',str(run)],cwd=ROOT,check=True)
     with socket.socket() as probe:
         probe.bind(('127.0.0.1',0));port=probe.getsockname()[1]
