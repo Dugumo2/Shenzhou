@@ -130,12 +130,16 @@ def _context(record, now, lock=False):
 
 
 def _snapshot(record, now, lock=False):
+    from .api_helpers import byte_string, current_recorded_totals, recorded_remaining
+    from .display_estimate import project_estimate
     plan, cycle, anchor, next_at, reason = _context(record, now, lock)
     metering = assess_metering(record, cycle, now)
     quality = metering['quality']
     known = metering['usable']
     quota = record.applied_snapshot.get('quota_bytes') if record.applied_revision else None
+    quota = quota if byte_string(quota) is not None else None
     used = cycle.used_bytes if cycle and known else None
+    recorded = current_recorded_totals(record, cycle, now)
     return {
         'service_id': str(record.public_id), 'time_zone': 'Asia/Shanghai',
         'billing_revision': plan.revision if plan else 0,
@@ -149,6 +153,10 @@ def _snapshot(record, now, lock=False):
         'plan': {'next_reset_at': stamp(next_at), 'anchor_day': anchor[0], 'hour': anchor[1], 'minute': anchor[2]} if anchor else None,
         'quota_bytes': str(quota) if quota is not None else None, 'used_bytes': str(used) if used is not None else None,
         'remaining_bytes': str(max(0, quota - used)) if quality == 'fresh' and used is not None and quota is not None else None,
+        **recorded, 'recorded_remaining_bytes': recorded_remaining(quota, recorded),
+        'quota_state': 'applied' if byte_string(quota) is not None else 'configured',
+        'usage_estimate': project_estimate(record, cycle, quota, recorded, now)
+            if byte_string(quota) is not None and used is None else None,
         'usage_quality': quality, 'usage_updated_at': stamp(record.usage_updated_at),
         'expires_at': stamp(record.expires_at), 'can_modify': not reason, 'blocked_reason': reason,
     }

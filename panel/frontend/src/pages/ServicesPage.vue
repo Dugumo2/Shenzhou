@@ -24,7 +24,7 @@ watch(identity, () => { snapshot.reset(); if (auth.session?.authenticated) void 
   <div v-else class="service-grid"><article v-for="(service, index) in services" :key="service.id" class="surface service-card">
     <div class="card-heading"><div><p class="eyebrow">服务 {{ String(index + 1).padStart(2, '0') }}</p><h2>{{ service.name || '神舟云' }}</h2></div><el-tag :type="['active', 'applied'].includes(service.service_status?.state || service.business_state || '') ? 'success' : 'info'" effect="light">{{ service.service_status?.label || service.status_label }}</el-tag></div>
     <p v-if="service.quota_state === 'configured'" class="small muted">套餐额度待应用</p>
-    <div class="usage-number"><span v-if="serviceUsage(service).mode === 'estimated'">套餐已用 </span><span v-else-if="serviceUsage(service).mode === 'recorded'">已记录 </span>{{ formatGB(serviceUsage(service).bytes, '暂无可靠统计') }}<span> / {{ formatGB(service.quota_bytes) }}</span></div>
+    <div class="usage-number"><span v-if="['estimated', 'booked'].includes(serviceUsage(service).mode)">套餐已用 </span><span v-else-if="serviceUsage(service).mode === 'recorded'">已记录 </span>{{ formatGB(serviceUsage(service).bytes, '暂无可靠统计') }}<span> / {{ formatGB(service.quota_bytes) }}</span></div>
     <el-progress v-if="service.usage.quality === 'measured' && service.quota_state === 'applied' && service.remaining_bytes !== null && usagePercent(service.used_bytes, service.quota_bytes) !== null" :percentage="usagePercent(service.used_bytes, service.quota_bytes) || 0" :show-text="false" :stroke-width="7" />
     <p v-if="service.usage.quality === 'stale'" class="muted small" role="status">用量更新延迟，请稍后更新。</p>
     <p v-else-if="serviceUsage(service).mode === 'unknown'" class="muted small" role="status">用量暂不可用，请稍后更新。</p>

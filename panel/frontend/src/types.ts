@@ -31,6 +31,7 @@ export interface Service {
   provider_usage?: ProviderUsage
   id: string; name: string; quota_bytes: Bytes; used_bytes: Bytes; raw_bytes: Bytes
   recorded_used_bytes?: Bytes; recorded_upload_bytes?: Bytes; recorded_download_bytes?: Bytes
+  recorded_remaining_bytes?: Bytes
   usage_estimate?: UsageEstimate | null
   remaining_bytes: Bytes; next_reset_at: string | null; expires_at: string | null
   state: string; enabled: boolean; status_label: string; source_type: 'entitlement' | 'membership' | 'p8'
@@ -63,6 +64,8 @@ export interface Billing {
   current_cycle: { id: number | string; starts_at: string; ends_at: string; used_bytes: Bytes; raw_bytes: Bytes; weighted_remainder: string | number | null } | null
   plan: { next_reset_at: string; anchor_day: number; hour: number; minute: number } | null
   quota_bytes: Bytes; used_bytes: Bytes; remaining_bytes: Bytes
+  quota_state?: 'applied' | 'configured'; recorded_used_bytes?: Bytes; recorded_remaining_bytes?: Bytes
+  usage_estimate?: UsageEstimate | null
   usage_quality: string; expires_at: string | null; can_modify: boolean; blocked_reason: string | null
 }
 export interface BillingPreview extends Billing {

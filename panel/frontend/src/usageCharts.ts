@@ -1,4 +1,4 @@
-import { integerBytes } from './display.ts'
+import { integerBytes, recordedRemaining } from './display.ts'
 import { reliableUsagePercent } from './usage-types.ts'
 import type { UsageOverviewData, UsageDay } from './usage-types.ts'
 
@@ -13,6 +13,10 @@ export function quotaGauge(data: UsageOverviewData) {
   const estimated = integerBytes(data.summary.usage_estimate?.used_bytes ?? null)
   if (used === null && data.summary.usage_estimate?.state === 'estimated' && data.summary.quota_state === 'applied'
       && estimated !== null && total !== null && total > 0n) return { mode: 'estimated', percent: boundedPercent(estimated, total) }
+  const booked = integerBytes(data.summary.recorded_used_bytes ?? null)
+  if (recordedRemaining(data.summary.quota_bytes, data.summary.recorded_used_bytes ?? null,
+      data.summary.recorded_remaining_bytes ?? null, data.summary.quota_state === 'applied') !== null
+      && booked !== null && total !== null) return { mode: 'booked', percent: total > 0n ? boundedPercent(booked, total) : null }
   // 过期样本只能画最后确认占比；灰色部分不得表示可用余额。
   if (data.quality.state === 'stale' && data.summary.quota_state === 'applied' && data.current_cycle
       && used !== null && total !== null && total > 0n) return { mode: 'recorded', percent: boundedPercent(used, total) }

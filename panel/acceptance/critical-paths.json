@@ -1,9 +1,9 @@
 {
   "schema_version": 1,
   "contract_id": "shenzhou-critical-paths",
-  "revision": "2026-10-18",
-  "task_id": "SZC-6.1.20.1",
-  "description": "保留原11场景并补齐流量加载、缓存、图表操作及状态诊断隔离的过程验收；不是生产验收结果或R01—R33全部交付证明。",
+  "revision": "2026-10-21",
+  "task_id": "SZC-6.1.4.3",
+  "description": "保留全部既有用户路径，补齐一次衔接退出后新账期已有入账的余额显示；采样完整性与账本展示分别验证。",
   "viewports": {
     "desktop": {
       "width": 1440,
@@ -920,6 +920,53 @@
       "screenshot_checkpoints": [
         "metadata-replayed",
         "metadata-permission-revoked"
+      ],
+      "evidence_types": [
+        "screenshots",
+        "browser-interaction"
+      ]
+    },
+    {
+      "id": "CP15-recorded-balance",
+      "title": "旧期衔接与次期账本余额一致展示",
+      "requirements": [
+        "R03",
+        "R08",
+        "R10",
+        "R25"
+      ],
+      "entry_path": "/services",
+      "roles": [
+        "user",
+        "admin"
+      ],
+      "viewports": [
+        "desktop",
+        "mobile"
+      ],
+      "assertions": [
+        {
+          "id": "CP15-A01",
+          "description": "旧期一次衔接金额和正常图形保留。"
+        },
+        {
+          "id": "CP15-A02",
+          "description": "新期真实部分观测入账，列表详情admin和usage同额，原可靠字段仍为空。"
+        },
+        {
+          "id": "CP15-A03",
+          "description": "三页面同显示套餐已用与剩余，圆环上传下载和390px保留。"
+        },
+        {
+          "id": "CP15-A04",
+          "description": "管理员诊断真实保留，旧衔接不跨期，恢复隔离夹具不改变原账。"
+        }
+      ],
+      "screenshot_checkpoints": [
+        "balance-old-cycle",
+        "balance-new-cycle-list",
+        "balance-new-cycle-detail",
+        "balance-admin"
       ],
       "evidence_types": [
         "screenshots",

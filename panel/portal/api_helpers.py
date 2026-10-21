@@ -74,7 +74,7 @@ def confirmed_ledger(queryset):
 
 
 def current_recorded_totals(record, cycle, now):
-    """只汇总当前唯一周期中同服务身份的确认行，不把部分量升格为完整余额。"""
+    """只汇总当前唯一周期的同服务确认行；账本展示与完整计量证明分开。"""
     empty = {'recorded_used_bytes': None, 'recorded_upload_bytes': None, 'recorded_download_bytes': None}
     if cycle is None or cycle.entitlement_id != record.pk:
         return empty
@@ -89,6 +89,20 @@ def current_recorded_totals(record, cycle, now):
     return {'recorded_used_bytes': byte_string(values['used']),
         'recorded_upload_bytes': byte_string(values['upload']),
         'recorded_download_bytes': byte_string(values['download'])}
+
+
+def recorded_remaining(quota, recorded):
+    """按已应用额度与已入账金额显示余额，不修改可靠余额或采样质量。"""
+    value = recorded.get('recorded_used_bytes')
+    if byte_string(quota) is None or type(value) is not str:
+        return None
+    try:
+        used = int(value)
+    except ValueError:
+        return None
+    if byte_string(used) != value:
+        return None
+    return byte_string(max(0, quota - used))
 
 
 def service_facts(record, source_type, now):
@@ -133,6 +147,7 @@ def service_facts(record, source_type, now):
             'quota_state': quota_state, 'state': state, 'enabled': enabled, 'is_applied': is_applied,
             'application': application, 'next_reset': next_reset, 'expires': expires,
             'remaining': remaining, **recorded,
+            'recorded_remaining_bytes': recorded_remaining(quota, recorded) if quota_state == 'applied' else None,
             'usage_estimate': project_estimate(record, cycle, quota, recorded, now)
                 if source_type == 'entitlement' and quota_state == 'applied' and used is None else None}
 
@@ -234,6 +249,7 @@ def project_service(record, source_type, *, now=None, detail=False, administrato
               'quota_bytes': byte_string(quota), 'quota_state': facts['quota_state'],
               'used_bytes': byte_string(used), 'raw_bytes': byte_string(raw), 'remaining_bytes': byte_string(remaining),
               **{key: facts[key] for key in ('recorded_used_bytes', 'recorded_upload_bytes', 'recorded_download_bytes')},
+              'recorded_remaining_bytes': facts['recorded_remaining_bytes'],
               'usage_estimate': facts['usage_estimate'],
               'next_reset_at': iso(facts['next_reset']), 'expires_at': iso(facts['expires']),
               'state': facts['state'], 'enabled': facts['enabled'],

@@ -204,6 +204,9 @@ def control(run, operation, job_id):
     """只修改当前验收假库；不运行探测器，不建立网络连接。"""
     from django.contrib.auth import get_user_model
     from portal.models import ResourceCheckJob, CheckResult, ServerObservation, RateBucket
+    if operation == 'balance-profile':
+        from recorded_balance_fixture import control as balance_control
+        return balance_control(run, job_id)
     if operation == 'usage-rate-reset':
         # 新场景开始前隔离假账号/IP计数；保留真实产品阈值和限流函数，不在失败后清理重试。
         from django.utils.crypto import salted_hmac
@@ -280,7 +283,7 @@ if __name__ == '__main__':
     parser.add_argument('action',choices=['seed','serve','control'])
     parser.add_argument('--run',required=True)
     parser.add_argument('--port',type=int,default=18871)
-    parser.add_argument('--operation',choices=['inspect_jobs','complete_job','revoke_admin','restore_admin','reset_checks','observations_stale','observations_restore','release-old','release-candidate','release-recovery-old','usage-clock','usage-service-state','usage-rate-reset'])
+    parser.add_argument('--operation',choices=['inspect_jobs','complete_job','revoke_admin','restore_admin','reset_checks','observations_stale','observations_restore','release-old','release-candidate','release-recovery-old','usage-clock','usage-service-state','usage-rate-reset','balance-profile'])
     parser.add_argument('--job-id')
     args=parser.parse_args()
     run=configure(args.run)

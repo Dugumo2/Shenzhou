@@ -48,6 +48,7 @@ class UsageAPITests(BillingFixture, TestCase):
             'usage_estimate': None,
             'charged_bytes': str(30 * GB), 'upload_bytes': str(12 * GB), 'download_bytes': str(12 * GB),
             'recorded_used_bytes': str(30 * GB), 'recorded_upload_bytes': str(12 * GB), 'recorded_download_bytes': str(12 * GB),
+            'recorded_remaining_bytes': str(70 * GB),
             'remaining_bytes': str(70 * GB), 'next_reset_at': data['summary']['next_reset_at']})
         self.assertEqual(parse_datetime(data['summary']['next_reset_at']), self.cycle.ends_at)
         self.assertEqual(data['quality']['state'], 'measured')

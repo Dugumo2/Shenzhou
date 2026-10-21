@@ -1,6 +1,6 @@
 """真实 Django 保存→文件投影→持久回执反例，全部使用独立假库/假 P11 文件。"""
 from copy import deepcopy
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone as datetime_timezone
 import io
 import json
 from pathlib import Path
@@ -29,6 +29,10 @@ class ResourcePlanConsumerTests(TransactionTestCase):
     save = service_tests.ResourcePlanServiceTests.save
 
     def setUp(self):
+        # 本组夹具的初值属于9/20起的首个采购周期，不能随真实日期越过10/20而改变语义。
+        clock = patch('django.utils.timezone.now', return_value=datetime(2026, 10, 18, 4, tzinfo=datetime_timezone.utc))
+        clock.start()
+        self.addCleanup(clock.stop)
         service_tests.ResourcePlanServiceTests.setUp(self)
         self.now = timezone.now()
         self.base = Path(__file__).resolve().parents[2]/'staging'

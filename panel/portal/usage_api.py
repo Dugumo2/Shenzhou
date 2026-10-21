@@ -85,6 +85,7 @@ def _service(record, source_type, period, now):
             'summary': {'quota_bytes': projection['quota_bytes'], 'quota_state': projection['quota_state'],
                         'charged_bytes': projection['used_bytes'],
                         'usage_estimate': projection['usage_estimate'],
+                        'recorded_remaining_bytes': projection['recorded_remaining_bytes'],
                         **{key: projection[key] for key in ('recorded_used_bytes', 'recorded_upload_bytes', 'recorded_download_bytes')},
                         'upload_bytes': projection['recorded_upload_bytes'],
                         'download_bytes': projection['recorded_download_bytes'],
