@@ -119,7 +119,13 @@ export async function login(page: Page, username = 'fixture-admin') {
 }
 export async function adminNavigation(page: Page, label: string) {
   if (await page.getByRole('button', { name: '打开导航菜单' }).isVisible()) await page.getByRole('button', { name: '打开导航菜单' }).click()
-  await page.getByRole('link', { name: label, exact: true }).filter({ visible: true }).first().click()
+  const link = page.getByRole('link', { name: label, exact: true }).filter({ visible: true }).first()
+  const href = await link.getAttribute('href')
+  expect(href).toBeTruthy()
+  await link.click()
+  // 懒加载路由完成前再次打开菜单，会被上一轮路径watch关闭；先确认真实导航落定。
+  await expect(page).toHaveURL(new URL(href!, page.url()).href)
+  await expect(page.locator('#mobile-navigation')).toBeHidden()
 }
 export async function noOverflow(page: Page) {
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy()
